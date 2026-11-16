@@ -14,7 +14,7 @@ if (/[?&]simsafe/.test(location.search)) document.documentElement.classList.add(
 
 // ================= state =================
 const KEY = 'wesReading.v1';
-const DEF = { v: 1, stars: 0, points: 0, totalStars: 0, rain: { lv: 0, good: {}, done: 0, unlocked: 0 }, story: { read: {}, pages: {} },
+const DEF = { v: 1, stars: 0, points: 0, totalStars: 0, rain: { lv: 1, good: {}, done: 0, unlocked: 1 }, story: { read: {}, pages: {} },
   race: { lv: 0, good: {}, done: 0, unlocked: 0 }, act: { lv: 0, good: 0, done: 0, seen: {} }, owned: {}, upper: false, letterSounds: 'auto',
   log: { words: 0, sentences: 0, matches: 0, stories: 0, minutes: 0, firstPlay: 0, lastPlay: 0, misses: 0 }, hard: {} };
 let S;
@@ -24,14 +24,18 @@ function load() {
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 load();
+// v2: Letters alone was too easy, so everyone starts at First Words (Letters stays available on the map)
+if (S.rain.unlocked < 1) { S.rain.unlocked = 1; if (S.rain.lv === 0) S.rain.lv = 1; save(); }
 
 // ================= audio =================
+// v2 engine: clips are fetched + decoded once into Web Audio buffers and scheduled back-to-back
+// (gapless, no per-clip media-element latency, no Range-request issues). If Web Audio isn't running
+// or a clip won't decode, it falls back to one shared <audio> element, then to speechSynthesis.
 const SET = { w: new Set(M.w), p: new Set(M.p), ln: new Set(M.ln), ls: new Set(M.ls) };
-const AU = window.__AU = { log: [], errors: [], fallbacks: 0, unlocked: false };
-let voiceEl = null, ctx = null, seqId = 0;
+const AU = window.__AU = { log: [], errors: [], fallbacks: 0, unlocked: false, engine: 'webaudio' };
+let voiceEl = null, ctx = null, seqId = 0, voiceGain = null, active = null;
 const SOUND_TEXT = { a: 'ah', b: 'buh', c: 'kuh', d: 'duh', e: 'eh', f: 'fff', g: 'guh', h: 'huh', i: 'ih', j: 'juh', k: 'kuh', l: 'lll', m: 'mmm', n: 'nnn', o: 'aw', p: 'puh', q: 'kwuh', r: 'rrr', s: 'sss', t: 'tuh', u: 'uh', v: 'vvv', w: 'wuh', x: 'ks', y: 'yuh', z: 'zzz', sh: 'shh', ch: 'chuh', th: 'th', ck: 'kuh', ng: 'ng', ee: 'ee', oo: 'oo', ll: 'lll', ss: 'sss', ff: 'fff' };
 function clip(kind, id) {
-  // returns {src, text}
   if (kind === 'w') { const k = D.slug(id); return { src: SET.w.has(k) ? 'audio/w/' + k + '.mp3' : null, text: id }; }
   if (kind === 'p') return { src: SET.p.has(id) ? 'audio/p/' + id + '.mp3' : null, text: D.PHRASES[id] || id };
   if (kind === 'ln') return { src: SET.ln.has(id) ? 'audio/ln/' + id + '.mp3' : null, text: D.LETTER_NAME_TEXT[id] || id };
@@ -45,18 +49,40 @@ function ensureVoice() {
 }
 function audioCtx() {
   const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
-  if (!ctx) { try { ctx = new AC(); } catch (e) { return null; } }
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  if (!ctx) { try { ctx = new AC(); voiceGain = ctx.createGain(); voiceGain.gain.value = 1; voiceGain.connect(ctx.destination); } catch (e) { return null; } }
+  if (ctx.state !== 'running') { try { const p = ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
   return ctx;
 }
+// tiny silent WAV used to unlock the <audio> element inside the first tap
+const SILENT = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA';
 function unlockAudio() {
-  // Must run inside the first tap. Plays the greeting on the shared <audio> element so iOS Safari
-  // allows that element to play later clips without a tap, and resumes Web Audio for sound effects.
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
   audioCtx();
-  try { const b = ctx && ctx.createBuffer(1, 1, 22050); if (b) { const s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } } catch (e) {}
+  try { const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch (e) {}
+  try { const a = ensureVoice(); a.src = SILENT; const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   AU.unlocked = true;
 }
+// keep Web Audio alive on iOS (it can be suspended after backgrounding / interruptions)
+['pointerdown', 'touchend'].forEach(ev => document.addEventListener(ev, () => { if (AU.unlocked) audioCtx(); }, { passive: true, capture: true }));
+const BUF = new Map();
+function decode(ab) {
+  return new Promise((res, rej) => { try { const p = ctx.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); } catch (e) { rej(e); } });
+}
+function loadBuf(src) {
+  if (!BUF.has(src)) {
+    const c = audioCtx();
+    BUF.set(src, !c ? Promise.resolve(null) : fetch(src).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+      .then(decode).catch(e => { AU.errors.push('decode ' + src + ' ' + e); BUF.delete(src); return null; }));
+  }
+  return BUF.get(src);
+}
+function preload(items) { if (!audioCtx()) return; norm(items).forEach(it => { const c = clip(it.k, it.id); if (c.src) loadBuf(c.src); }); }
+const timeout = (p, ms) => Promise.race([p, wait(ms).then(() => null)]);
+function norm(items) {
+  if (!Array.isArray(items[0]) && !(items[0] && items[0].k)) items = [items];
+  return items.map(it => Array.isArray(it) ? { k: it[0], id: it[1], on: it[2] } : it);
+}
+function useWA() { return S.engine !== 'html' && ctx && ctx.state === 'running'; }
 function speakFallback(text) {
   return new Promise(res => {
     AU.fallbacks++;
@@ -71,39 +97,80 @@ function playSrc(src, my, onTime) {
     a.onended = () => fin(true); a.onerror = () => { AU.errors.push(src); fin(false); };
     try {
       a.src = src;
-      const rec = { src, t: Date.now(), ok: null }; AU.log.push(rec); if (AU.log.length > 300) AU.log.shift();
+      const rec = { src, t: Date.now(), ok: null, html: true }; AU.log.push(rec); if (AU.log.length > 400) AU.log.shift();
       const p = a.play();
       if (p && p.then) p.then(() => { rec.ok = true; }).catch(err => { rec.ok = false; rec.err = String(err && err.name); AU.errors.push(src + ' ' + rec.err); fin(false); });
       else rec.ok = true;
       if (onTime) { const tick = () => { if (done || my !== seqId) return; onTime(a.currentTime * 1000); raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); }
-      setTimeout(() => fin(true), 15000);
+      // never stall: if playback hasn't started in 2.5 s give up on this clip; hard cap 12 s
+      setTimeout(() => { if (!a.currentTime) fin(false); }, 2500);
+      setTimeout(() => fin(true), 12000);
     } catch (e) { AU.errors.push(src + ' ' + e); fin(false); }
   });
 }
-// say([['p','home'], ['w','cat'], {k:'ls',id:'c', on: fn}], {gap}) -> Promise<bool finished>
+function stopAll() {
+  if (active) { const a = active; active = null; a.nodes.forEach(n => { try { n.stop(); } catch (e) {} }); a.timers.forEach(clearTimeout); cancelAnimationFrame(a.raf); a.resolve(false); }
+  if (voiceEl) { try { voiceEl.pause(); } catch (e) {} }
+  if (window.speechSynthesis) try { speechSynthesis.cancel(); } catch (e) {}
+}
+function playBuffers(list, bufs, my, opt) {
+  return new Promise(resolve => {
+    const c = ctx, gap = (opt.gap || 0) / 1000; let t = c.currentTime + 0.02;
+    const A = { nodes: [], timers: [], raf: 0, resolve }; active = A;
+    const timed = [];
+    bufs.forEach((b, i) => {
+      const it = list[i], s = c.createBufferSource(); s.buffer = b; s.connect(voiceGain); s.start(t); A.nodes.push(s);
+      const at = t, src = clip(it.k, it.id).src;
+      A.timers.push(setTimeout(() => { if (active !== A) return; AU.log.push({ src, t: Date.now(), ok: true, wa: true }); if (AU.log.length > 400) AU.log.shift(); if (it.on) try { it.on(); } catch (e) {} }, Math.max(0, (at - c.currentTime) * 1000)));
+      if (it.time) timed.push([at, b.duration, it.time]);
+      t += b.duration + (i < bufs.length - 1 ? gap : 0);
+    });
+    if (timed.length) { const tick = () => { if (active !== A) return; const now = c.currentTime; timed.forEach(([at, d, fn]) => { if (now >= at && now <= at + d + .3) fn((now - at) * 1000); }); A.raf = requestAnimationFrame(tick); }; A.raf = requestAnimationFrame(tick); }
+    A.timers.push(setTimeout(() => { if (active === A) { active = null; resolve(true); } }, (t - c.currentTime) * 1000 + 30));
+  });
+}
+// say([['p','home'], ['w','cat'], {k:'ls',id:'c', on: fn, time: fn(ms)}], {gap}) -> Promise<bool finished>
 async function say(items, opt) {
   opt = opt || {};
-  const my = ++seqId; stopVoiceOnly();
-  if (!Array.isArray(items[0]) && !(items[0] && items[0].k)) items = [items];
-  for (const it of items) {
+  const my = ++seqId; stopAll();
+  const list = norm(items);
+  if (useWA()) {
+    const bufs = await timeout(Promise.all(list.map(it => { const c = clip(it.k, it.id); return c.src ? loadBuf(c.src) : null; })), 4000);
     if (my !== seqId) return false;
-    const k = it.k || it[0], id = it.id || it[1], on = it.on || it[2];
-    if (on) try { on(); } catch (e) {}
-    const c = clip(k, id);
+    if (bufs && bufs.every(Boolean)) { const ok = await playBuffers(list, bufs, my, opt); if (ok && opt.after && my === seqId) try { opt.after(); } catch (e) {} return ok && my === seqId; }
+  }
+  for (let i = 0; i < list.length; i++) {
+    const it = list[i];
+    if (my !== seqId) return false;
+    if (it.on) try { it.on(); } catch (e) {}
+    const c = clip(it.k, it.id);
     let ok = false;
     if (c.src) ok = await playSrc(c.src, my, it.time);
     if (!ok && my === seqId) await speakFallback(c.text);
-    if (opt.gap && my === seqId) await wait(opt.gap);
+    if (opt.gap && my === seqId && i < list.length - 1) await wait(opt.gap);
   }
   if (opt.after && my === seqId) try { opt.after(); } catch (e) {}
   return my === seqId;
 }
-function stopVoiceOnly() { if (voiceEl) { try { voiceEl.pause(); } catch (e) {} } if (window.speechSynthesis) try { speechSynthesis.cancel(); } catch (e) {} }
-function hush() { seqId++; stopVoiceOnly(); }
+function hush() { seqId++; stopAll(); }
 let lastPrompt = null;
 function prompt(items) { lastPrompt = items; return say(items); }
 const praise = () => ['p', 'p' + (1 + rnd(10))];
 const oops = () => ['p', 't' + (1 + rnd(4))];
+// every [kind, id] the app can speak (used by the audio audit test)
+function speakable() {
+  const out = [], w = (x) => out.push(['w', x]);
+  D.RAIN_LEVELS.forEach(l => l.words.forEach(x => l.mode === 'letter' ? null : w(x.word)));
+  Object.values(D.LETTER_KEY).forEach(([k]) => w(k));
+  D.STORIES.forEach(s => { w(s.title); s.pages.forEach((p, i) => { out.push(['s', s.id + '-' + i]); D.tokens(p.t).forEach(t => t.w && w(t.w)); }); });
+  D.RACE_NOUNS.forEach(n => { w(n.s); w(n.p); }); D.RACE_VERBS.forEach(v => { w(v.b); w(v.s); }); D.RACE_ADJS.forEach(a => w(a.w)); D.RACE_PLACES.forEach(p => w(p.w));
+  ['the', 'The', 'can'].forEach(w);
+  D.ACTIONS.forEach(a => w(a.w)); D.ACTION_PHRASES.forEach(p => p.w.split(' ').forEach(w));
+  D.ROOMS.forEach(r => { w(r.name); r.items.forEach(it => w(it[0])); });
+  Object.keys(D.PHRASES).forEach(k => out.push(['p', k]));
+  D.LETTERS.forEach(l => out.push(['ln', l])); D.LETTERS.concat(D.DIGRAPHS).forEach(g => out.push(['ls', g]));
+  return out;
+}
 
 // ---- sound effects (Web Audio synth) ----
 function tone(f, t0, dur, type, vol, f2) {
@@ -156,18 +223,54 @@ function burst(el, chars) {
     fx.appendChild(s); setTimeout(() => s.remove(), 950);
   }
 }
+// ---- actions: Web Animations API (restarts reliably on iOS Safari, works on any element, and
+// returns a promise so actions can run one after another) ----
+const T = (s) => ({ transform: s });
+const TO = (s, o) => ({ transform: s, opacity: o });
+const JUMP = [T('translateY(0) scaleY(1)'), { transform: 'translateY(0) scaleY(.8)', offset: .15 }, { transform: 'translateY(-60%) scaleY(1.05)', offset: .5 }, { transform: 'translateY(0) scaleY(.9)', offset: .85 }, T('translateY(0) scaleY(1)')];
+const ANIM = {
+  jump: [JUMP, 800, 2], jump2: [JUMP, 500, 3],
+  spin: [[T('rotate(0deg)'), T('rotate(360deg)')], 1000, 2],
+  grow: [[T('scale(1)'), { transform: 'scale(1.9)', offset: .35 }, { transform: 'scale(1.9)', offset: .75 }, T('scale(1)')], 1900, 1],
+  shrink: [[T('scale(1)'), { transform: 'scale(.35)', offset: .35 }, { transform: 'scale(.35)', offset: .75 }, T('scale(1)')], 1900, 1],
+  hide: [[TO('translateY(0)', 1), { transform: 'translateY(45%)', opacity: 0, offset: .25 }, { transform: 'translateY(45%)', opacity: 0, offset: .75 }, TO('translateY(0)', 1)], 2200, 1],
+  zoom: [[TO('translateX(0)', 1), { transform: 'translateX(160%) skewX(-12deg)', opacity: 1, offset: .3 }, { transform: 'translateX(170%)', opacity: 0, offset: .31 }, { transform: 'translateX(-170%)', opacity: 0, offset: .33 }, { transform: 'translateX(-150%) skewX(10deg)', opacity: 1, offset: .36 }, TO('translateX(0)', 1)], 1800, 1],
+  sleep: [[T('rotate(0deg) scale(1)'), { transform: 'rotate(-80deg) scale(1)', offset: .2 }, { transform: 'rotate(-80deg) scale(1.07)', offset: .4 }, { transform: 'rotate(-80deg) scale(.97)', offset: .6 }, { transform: 'rotate(-80deg) scale(1)', offset: .8 }, T('rotate(0deg) scale(1)')], 2600, 1],
+  shake: [[T('translateX(0)'), T('translateX(-9%)'), T('translateX(9%)'), T('translateX(0)')], 450, 3],
+  fly: [[T('translate(0,0) rotate(0deg)'), { transform: 'translate(-35%,-75%) rotate(-10deg)', offset: .3 }, { transform: 'translate(35%,-95%) rotate(10deg)', offset: .65 }, T('translate(0,0) rotate(0deg)')], 2200, 1],
+  swim: [[T('translate(0,0) rotate(0deg)'), { transform: 'translate(-40%,10%) rotate(-8deg)', offset: .25 }, { transform: 'translate(0,-5%) rotate(0deg)', offset: .5 }, { transform: 'translate(40%,10%) rotate(8deg)', offset: .75 }, T('translate(0,0) rotate(0deg)')], 2000, 1],
+  dance: [[T('rotate(0deg) translateY(0)'), T('rotate(-18deg) translateY(-12%)'), T('rotate(0deg) translateY(0)'), T('rotate(18deg) translateY(-12%)'), T('rotate(0deg) translateY(0)')], 900, 2],
+  roll: [[T('translateX(0) rotate(0deg)'), { transform: 'translateX(70%) rotate(360deg)', offset: .5 }, T('translateX(0) rotate(0deg)')], 1900, 1],
+  fall: [[TO('translateY(-120%) rotate(0deg)', 0), { transform: 'translateY(-100%) rotate(0deg)', opacity: 1, offset: .1 }, { transform: 'translateY(0) rotate(30deg)', opacity: 1, offset: .7 }, { transform: 'translateY(-12%) rotate(20deg)', opacity: 1, offset: .8 }, TO('translateY(0) rotate(0deg)', 1)], 1600, 1],
+  flip: [[T('translateY(0) rotate(0deg)'), T('translateY(-50%) rotate(180deg)'), T('translateY(0) rotate(360deg)')], 1100, 2],
+  wiggle: [[T('rotate(0deg)'), T('rotate(-12deg)'), T('rotate(12deg)'), T('rotate(0deg)')], 400, 4],
+  sing: [[T('scale(1) rotate(0deg)'), T('scale(1.12) rotate(-6deg)'), T('scale(1) rotate(0deg)')], 600, 3],
+  wave: [[T('rotate(0deg)'), T('rotate(-25deg)'), T('rotate(0deg)')], 500, 4]
+};
+const DECO = { sleep: ['💤', '💤'], sing: ['🎵', '🎶'], dance: ['🎶'], fly: ['💨'], swim: ['💧'], zoom: ['💨'], grow: ['✨'], jump: ['⭐'], fall: ['💥'], spin: ['🌀'], wave: ['👋'] };
+window.__animLog = [];
 function anim(el, a, decoHost) {
-  if (!el) return;
-  const inner = el.firstElementChild && el.firstElementChild.tagName === 'SPAN' ? el.firstElementChild : el;
-  inner.className = inner.className.replace(/\ba-\S+/g, '').trim(); void inner.offsetWidth; inner.classList.add('a-' + a);
+  if (!el || !ANIM[a]) return Promise.resolve();
+  let inner = el.firstElementChild && el.firstElementChild.tagName === 'SPAN' ? el.firstElementChild : el;
+  // transforms are ignored on display:inline elements (emoji spans) - force inline-block
+  if (getComputedStyle(inner).display === 'inline') inner.style.display = 'inline-block';
+  const [k, d, n] = ANIM[a];
+  if (inner._anim) { try { inner._anim.cancel(); } catch (e) {} }
+  const rec = { a, start: performance.now(), end: 0 }; window.__animLog.push(rec);
   const host = decoHost || el.parentElement;
-  const deco = { sleep: ['💤', '💤'], sing: ['🎵', '🎶'], dance: ['🎶'], hide: null, fly: ['💨'], swim: ['🫧', '💧'], zoom: ['💨'], grow: ['✨'], jump: ['⭐'], fall: ['💥'], spin: ['🌀'], wave: ['👋'] }[a];
-  if (deco && host) deco.forEach((d, i) => setTimeout(() => {
+  if (DECO[a] && host) DECO[a].forEach((dch, i) => setTimeout(() => {
     const r = el.getBoundingClientRect(), h = host.getBoundingClientRect();
-    const s = document.createElement('div'); s.className = 'deco emoji'; s.textContent = d === '🫧' ? '💧' : d;
+    const s = document.createElement('div'); s.className = 'deco emoji'; s.textContent = dch;
     s.style.left = (r.left - h.left + r.width * .7) + 'px'; s.style.top = (r.top - h.top) + 'px'; host.appendChild(s); setTimeout(() => s.remove(), 1700);
   }, i * 500));
-  if (a === 'hide' && host) { const b = document.createElement('div'); b.className = 'bush emoji'; b.textContent = '🌳'; const r = el.getBoundingClientRect(), h = host.getBoundingClientRect(); b.style.left = (r.left - h.left + r.width / 2) + 'px'; b.style.top = (r.top - h.top + r.height * .6) + 'px'; host.appendChild(b); setTimeout(() => b.remove(), 2200); }
+  if (a === 'hide' && host) { const b = document.createElement('div'); b.className = 'bush emoji'; b.textContent = '🌳'; const r = el.getBoundingClientRect(), h = host.getBoundingClientRect(); b.style.left = (r.left - h.left + r.width / 2) + 'px'; b.style.top = (r.top - h.top + r.height * .6) + 'px'; host.appendChild(b); setTimeout(() => b.remove(), d); }
+  if (inner.animate) {
+    const an = inner.animate(k, { duration: d, iterations: n, easing: 'ease-in-out' }); inner._anim = an;
+    const done = an.finished ? an.finished.catch(() => {}) : wait(d * n);
+    return Promise.race([done, wait(d * n + 300)]).then(() => { rec.end = performance.now(); });
+  }
+  inner.className = inner.className.replace(/\ba-\S+/g, '').trim(); void inner.offsetWidth; inner.classList.add('a-' + a);
+  return wait(d * n).then(() => { rec.end = performance.now(); });
 }
 
 // ================= screens =================
@@ -214,7 +317,22 @@ function start() {
   });
   setInterval(() => { if (document.visibilityState === 'visible' && AU.unlocked) { S.log.minutes++; save(); } }, 60000);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').then(() => { $('#loadNote').textContent = 'Works offline once loaded'; }).catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    // a new build took over: reload right away if he hasn't started yet, otherwise offer a tap-to-update banner
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      if ($('#start.show')) { reloading = true; location.reload(); return; }
+      if ($('.updBanner')) return;
+      const b = document.createElement('button'); b.className = 'updBanner'; b.innerHTML = '✨ New version — tap to update';
+      b.onclick = () => { reloading = true; location.reload(); }; document.body.appendChild(b);
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+      $('#loadNote').textContent = 'Works offline once loaded · build ' + (window.APP_BUILD || '?');
+      const check = () => { try { reg.update(); } catch (e) {} };
+      check(); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+      setInterval(check, 30 * 60000);
+    }).catch(() => {});
   }
 }
 function home(fromStart) {
@@ -270,8 +388,9 @@ function parentPanel() {
   <label>Action Words ${sel('pAct', ['1: 2 choices', '2: 3 choices', '3: 4 choices + phrases', '4: harder phrases'], S.act.lv)}</label>
   <label><input type="checkbox" id="pUpper" ${S.upper ? 'checked' : ''}> Show CAPITAL letters (lowercase is the default)</label>
   <label>Letter Rain says ${sel('pSnd', ['letter sounds for decodable words, names for others (default)', 'always letter sounds', 'always letter names'], ['auto', 'sounds', 'names'].indexOf(S.letterSounds))}</label>
+  <label>Voice player ${sel('pEng', ['Web Audio — smooth, gapless (default)', 'HTML audio — use if the iPad is on silent and you hear nothing'], S.engine === 'html' ? 1 : 0)}</label>
   <h3>Sound check</h3><button class="pbtn" id="pTest">▶ Play a test word</button> <span id="pTestRes" class="note"></span>
-  <div class="note">Voice clips are recorded MP3s (${M.voice || 'neural voice'}). Played: ${AU.log.length}, failed: ${AU.errors.length}, robot-voice fallback used: ${AU.fallbacks}. If you hear nothing, check the iPad volume and that the side switch is not on silent.</div>
+  <div class="note">App build ${window.APP_BUILD || '?'}. Audio engine now: ${useWA() ? 'Web Audio' : 'HTML audio'} (context ${ctx ? ctx.state : 'none'}). Voice clips are recorded MP3s (${M.voice || 'neural voice'}). Played: ${AU.log.length}, failed: ${AU.errors.length}, robot-voice fallback used: ${AU.fallbacks}. If you hear nothing, check the iPad volume and that the side switch is not on silent.</div>
   <h3>Stars & reset</h3>
   <button class="pbtn" id="pGift">+10 stars</button> <button class="pbtn danger" id="pReset">Reset all progress</button>
   <div class="row"><button class="pbtn" id="pClose">Done</button></div>`, 'parent');
@@ -281,26 +400,37 @@ function parentPanel() {
   $('#pClose', o).onclick = () => {
     S.rain.lv = +$('#pRain', o).value; S.rain.unlocked = Math.max(S.rain.unlocked, S.rain.lv);
     S.race.lv = +$('#pRace', o).value; S.race.unlocked = Math.max(S.race.unlocked, S.race.lv);
-    S.act.lv = +$('#pAct', o).value; S.upper = $('#pUpper', o).checked; S.letterSounds = ['auto', 'sounds', 'names'][+$('#pSnd', o).value];
+    S.act.lv = +$('#pAct', o).value; S.upper = $('#pUpper', o).checked; S.letterSounds = ['auto', 'sounds', 'names'][+$('#pSnd', o).value]; S.engine = +$('#pEng', o).value ? 'html' : 'webaudio';
     save(); o.remove(); home();
   };
 }
 
-// ================= round done / level up =================
+// ================= round done / level up / next =================
+function nextBtn(el, fn, label) {
+  const b = document.createElement('button'); b.className = 'nextBtn'; b.setAttribute('aria-label', label || 'Next');
+  b.innerHTML = `${E('⏭️')}<span>Next</span>`; el.appendChild(b);
+  b.addEventListener('click', () => { SFX.whoosh(); b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); fn(); say(['p', 'next']); });
+  return b;
+}
 function roundDone(again, extra) {
+  extra = extra || {};
   SFX.tada();
-  const o = overlay(`<div class="huge emoji">${extra && extra.levelUp ? '🏆' : '🌟'}</div><h2>${extra && extra.levelUp ? 'New level!' : 'You did it!'}</h2>
-  <div class="row"><button class="navBtn go" data-a="more" aria-label="Play more">${E('🔁')}</button><button class="navBtn" data-a="home" aria-label="Home">${E('🏠')}</button></div>`);
+  const hasNext = !!extra.nextLevel;
+  const o = overlay(`<div class="huge emoji">${extra.levelUp ? '🏆' : '🌟'}</div><h2>${extra.levelUp ? 'New level!' : 'You did it!'}</h2>
+  <div class="row"><button class="navBtn go" data-a="more" aria-label="Play more">${E('🔁')}</button>${hasNext ? `<button class="navBtn next" data-a="next" aria-label="Next level">${E('⏭️')}</button>` : ''}<button class="navBtn" data-a="home" aria-label="Home">${E('🏠')}</button></div>`);
   burst($('.huge', o));
-  const items = extra && extra.levelUp ? [['p', 'new_level'], ['p', 'round_done']] : [praise(), ['p', 'round_done']];
+  const items = extra.levelUp ? [['p', 'new_level'], ['p', 'round_done']] : [praise(), ['p', 'round_done']];
   lastPrompt = items; say(items);
-  o.addEventListener('click', (e) => { const b = e.target.closest('[data-a]'); if (!b) return; SFX.tap(); o.remove(); b.dataset.a === 'more' ? again() : home(); });
+  o.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-a]'); if (!b) return; SFX.tap(); o.remove();
+    if (b.dataset.a === 'more') again(); else if (b.dataset.a === 'next') { extra.nextLevel(); say(['p', 'next_level']); } else home();
+  });
 }
 function levelMap(id, title, levels, cur, unlocked, onPick, bg) {
   show(id, topBar(title) + `<div class="levelMap">${levels.map((l, i) => `<button class="lvBtn ${i > unlocked ? 'locked' : ''} ${i === cur ? 'cur' : ''}" data-i="${i}" style="background:${l.color || bg}">
     <span class="big emoji">${i > unlocked ? '🔒' : l.icon}</span><span>${esc(l.name)}</span></button>`).join('')}</div>`, (el) => {
     $$('.lvBtn', el).forEach(b => b.addEventListener('click', () => {
-      const i = +b.dataset.i; if (i > unlocked) { SFX.boing(); b.classList.remove('bounce'); return; }
+      const i = +b.dataset.i; if (i > unlocked) { SFX.boing(); anim(b, 'shake'); return; }
       SFX.pop(); onPick(i);
     }));
   });
@@ -317,54 +447,76 @@ function rainVoiceMode(lv, w) {
   if (lv.mode === 'letter') return 'sound';
   return lv.mode === 'sound' && !w.sight ? 'sound' : 'name';
 }
+// look-alike / sound-alike letters used as tricky distractors
+const CONFUSE = { b: 'dpq', d: 'bpq', p: 'qbd', q: 'pgd', m: 'nw', n: 'mhu', u: 'nvw', i: 'lj', l: 'it', t: 'fl', f: 'tv', e: 'ao', a: 'eo', o: 'ac', c: 'oe', s: 'zc', z: 's', v: 'fw', w: 'vm', g: 'qj', j: 'gi', h: 'nb', k: 'cx', r: 'n', x: 'k', y: 'v',
+  sh: ['ch', 'th', 's'], ch: ['sh', 'th'], th: ['sh', 'ch', 'f'], ck: ['c', 'k'], ng: ['n', 'g'], ee: ['oo', 'e'], oo: ['ee', 'o'], ll: ['l'], ss: ['s'], ff: ['f'] };
+// difficulty per level: tiles on screen, needed tile at most every N spawns, tricky-distractor & word-letter odds
+const RAIN_CFG = [
+  { maxT: 6, every: 3, conf: .35, wordP: 0, fall: 10000, spawn: 1300 },
+  { maxT: 7, every: 4, conf: .3, wordP: .35, fall: 9500, spawn: 1200 },
+  { maxT: 7, every: 4, conf: .35, wordP: .35, fall: 9000, spawn: 1150 },
+  { maxT: 8, every: 5, conf: .45, wordP: .3, fall: 9000, spawn: 1100 },
+  { maxT: 8, every: 5, conf: .5, wordP: .3, fall: 8500, spawn: 1050 },
+  { maxT: 9, every: 6, conf: .5, wordP: .3, fall: 8500, spawn: 1000 },
+  { maxT: 9, every: 6, conf: .55, wordP: .3, fall: 8000, spawn: 1000 }
+];
 function rainPlay() {
-  const lvIdx = S.rain.lv, lv = D.RAIN_LEVELS[lvIdx];
+  const lvIdx = S.rain.lv, lv = D.RAIN_LEVELS[lvIdx], cfg = RAIN_CFG[lvIdx];
   const recent = S.rain.recent || [];
   const pool = shuffle(lv.words.filter(w => !recent.includes(w.word)));
   let words = (pool.length >= 5 ? pool : shuffle(lv.words)).slice(0, 5);
-  // adaptive: bring back one word he found tricky at this level
   const tricky = lv.words.filter(w => (S.hard[w.word] || 0) > 0 && !words.includes(w));
   if (tricky.length) words[4] = pick(tricky);
-  let struggles = 0;
   S.rain.recent = recent.concat(words.map(w => w.word)).slice(-Math.min(15, lv.words.length - 5)); save();
-  let wi = 0, cur, gs, gi, misses, tiles = [], raf = 0, last = 0, spawnT = 0, idleT = 0, alive = true, busy = false, sinceNeeded = 0;
+  let struggles = 0, wi = 0, cur, gs, gi, misses, tiles = [], raf = 0, last = 0, spawnT = 0, idleT = 0, alive = true, busy = false;
+  let spawnN = 0, needAt = 0;
   const el = show('rain', topBar(`${E(lv.icon)} ${esc(lv.name)}`, { back: 'rain', backIcon: '⬅️' }) + `<div class="rainHead"><div class="rainPic emoji"></div><div class="slots"></div></div><div class="field"></div>`);
-  $('[data-go]', el).dataset.go = 'rain';
   const field = $('.field', el), slotsEl = $('.slots', el), picEl = $('.rainPic', el);
   cleanup = () => { alive = false; cancelAnimationFrame(raf); };
-  const ts = () => Math.max(64, Math.min(field.clientWidth / 6, field.clientHeight / 4.2, 120));
-  const fallMs = lv.mode === 'letter' || lvIdx <= 2 ? 10000 : 8500;
-  function sayG(g, mode) { return mode === 'sound' ? ['ls', g] : ['ln', g.length > 1 ? g[0] : g]; }
+  const ts = () => Math.max(60, Math.min(field.clientWidth / 6.5, field.clientHeight / 4.4, 116));
   function gItems(g, mode) { return mode === 'sound' ? [['ls', g]] : g.split('').map(c => ['ln', c]); }
+  function scheduleNeed() { needAt = spawnN + 2 + rnd(Math.max(1, cfg.every - 1)); } // never the very next tile
   function nextWord() {
+    if (!alive) return;
     if (wi >= words.length) return finish();
-    cur = words[wi++]; gs = lv.mode === 'letter' ? [cur.word] : graphemes(cur, lv); gi = 0; misses = 0; idleT = 0;
+    cur = words[wi++]; gs = lv.mode === 'letter' ? [cur.word] : graphemes(cur, lv); gi = 0; misses = 0; idleT = 0; busy = false;
     picEl.textContent = cur.pic; slotsEl.classList.toggle('long', gs.join('').length > 6);
     slotsEl.innerHTML = gs.map((g, i) => `<div class="slot lt ${i === 0 ? 'next' : ''}">${g}</div>`).join('');
     tiles.forEach(t => t.el.remove()); tiles = [];
-    const mode = rainVoiceMode(lv, cur);
-    if (lv.mode === 'letter') prompt([['p', 'rain_find'], ['ls', cur.word], ['ln', cur.word], ['w', D.LETTER_KEY[cur.word][0]]]);
-    else prompt(wi === 1 ? [['p', 'rain_intro'], ['p', 'rain_spell'], ['w', cur.word]] : [['p', 'rain_spell'], ['w', cur.word]]);
-    void mode;
+    spawnN = 0; scheduleNeed(); spawnT = cfg.spawn - 300;
+    const seq = lv.mode === 'letter' ? [['p', 'rain_find'], ['ls', cur.word], ['ln', cur.word], ['w', D.LETTER_KEY[cur.word][0]]]
+      : (wi === 1 ? [['p', 'rain_intro'], ['p', 'rain_spell'], ['w', cur.word]] : [['p', 'rain_spell'], ['w', cur.word]]);
+    prompt(seq);
+    // warm the decoder for this word's sounds
+    preload(gs.flatMap(g => gItems(g, rainVoiceMode(lv, cur))).concat([['w', cur.word], ['p', 'you_spelled']]));
   }
   picEl.addEventListener('click', () => { if (busy) return; SFX.tap(); lv.mode === 'letter' ? say([['ls', cur.word], ['w', D.LETTER_KEY[cur.word][0]]]) : say(['w', cur.word]); });
-  function spawn() {
-    const need = gs[gi]; const T = ts();
-    const neededOnScreen = tiles.some(t => t.g === need && !t.gone && t.y < field.clientHeight * .7);
-    let g;
-    if (!neededOnScreen || sinceNeeded >= 2) { g = need; sinceNeeded = 0; }
-    else {
-      sinceNeeded++;
+  function distractor(need) {
+    const r = Math.random(), conf = CONFUSE[need];
+    let g = null;
+    if (conf && r < cfg.conf) g = pick(Array.isArray(conf) ? conf : conf.split(''));
+    else if (r < cfg.conf + cfg.wordP) { const others = gs.filter((x, i) => i !== gi && x !== need); if (others.length) g = pick(others); }
+    if (!g) {
       const opts = lv.mode === 'sound' && gs.some(x => x.length > 1) ? D.LETTERS.concat(D.DIGRAPHS.slice(0, 7)) : D.LETTERS;
       do { g = pick(opts); } while (g === need);
     }
-    const W = field.clientWidth; const lanes = Math.max(3, Math.floor(W / (T * 1.25)));
-    const used = tiles.filter(t => t.y < T * 1.5).map(t => t.lane); let lane = rnd(lanes), tries = 0;
-    while (used.includes(lane) && tries++ < 8) lane = rnd(lanes);
-    const x = (lane + .5) * (W / lanes) - T / 2 + (rnd(20) - 10);
+    return g === need ? pick(D.LETTERS.filter(x => x !== need)) : g;
+  }
+  function spawn() {
+    const need = gs[gi]; const T = ts();
+    const neededOnScreen = tiles.some(t => t.g === need && !t.gone && t.y < field.clientHeight * .75);
+    spawnN++;
+    let g;
+    if (spawnN >= needAt || (!neededOnScreen && spawnN - needAt >= 0)) { g = need; scheduleNeed(); }
+    else if (!neededOnScreen && spawnN > cfg.every + 1) { g = need; scheduleNeed(); }
+    else g = distractor(need);
+    const W = field.clientWidth; const lanes = Math.max(3, Math.floor(W / (T * 1.2)));
+    const used = tiles.filter(t => !t.gone && t.y < T * 1.6).map(t => t.lane); let lane = rnd(lanes), tries = 0;
+    while (used.includes(lane) && tries++ < 10) lane = rnd(lanes);
+    const x = (lane + .5) * (W / lanes) - T / 2 + (rnd(16) - 8);
     const d = document.createElement('button'); d.className = 'tileL lt c' + rnd(5); d.style.setProperty('--ts', T + 'px');
     d.innerHTML = `<span>${g}</span>`; field.appendChild(d);
-    const t = { el: d, g, x: Math.max(4, Math.min(W - T - 4, x)), y: -T, lane, gone: false, speed: (field.clientHeight + T) / fallMs * (0.85 + Math.random() * .3) };
+    const t = { el: d, g, x: Math.max(4, Math.min(W - T - 4, x)), y: -T, lane, gone: false, need: g === need, speed: (field.clientHeight + T) / cfg.fall * (0.85 + Math.random() * .3) };
     d.style.transform = `translate(${t.x}px, ${t.y}px)`;
     d.addEventListener('pointerdown', (e) => { e.preventDefault(); hit(t); });
     tiles.push(t);
@@ -380,56 +532,60 @@ function rainPlay() {
       slot.classList.add('on'); slot.classList.remove('next');
       gi++; if (slotsEl.children[gi]) slotsEl.children[gi].classList.add('next');
       tiles.forEach(o => o.el.classList.remove('glow'));
-      if (gi >= gs.length) wordDone(); else say(lv.mode === 'letter' ? [['ls', need], ['ln', need]] : gItems(need, mode));
+      if (gi >= gs.length) wordDone(); else { scheduleNeed(); say(lv.mode === 'letter' ? [['ls', need], ['ln', need]] : gItems(need, mode)); }
     } else {
       SFX.boing(); misses++; S.log.misses++;
       t.el.classList.remove('bounce'); void t.el.offsetWidth; t.el.classList.add('bounce');
-      if (misses % 2 === 0) { glowNeeded(); say([oops()].concat(gItems(need, mode))); }
+      if (misses % 3 === 0) { glowNeeded(); say([oops()].concat(gItems(need, mode))); }
       else say(gItems(t.g, mode));
     }
   }
   function glowNeeded() { tiles.forEach(o => { if (o.g === gs[gi] && !o.gone) o.el.classList.add('glow'); }); }
   async function wordDone() {
     busy = true; SFX.chime();
-    const mode = rainVoiceMode(lv, cur);
+    const mode = rainVoiceMode(lv, cur), w = cur;
     if (misses <= 1) S.rain.good[lvIdx] = (S.rain.good[lvIdx] || 0) + 1;
-    if (misses >= 3) S.hard[cur.word] = (S.hard[cur.word] || 0) + 1;
-    else if (misses === 0 && S.hard[cur.word]) S.hard[cur.word]--;
-    if (misses >= 4) struggles++;
+    if (misses >= 3) S.hard[w.word] = (S.hard[w.word] || 0) + 1;
+    else if (misses === 0 && S.hard[w.word]) S.hard[w.word]--;
+    if (misses >= 5) struggles++;
     S.log.words++; S.rain.done++; save();
     tiles.forEach(t => { t.gone = true; t.el.classList.add('fade'); });
     const slots = $$('.slot', slotsEl);
     const seq = [];
-    if (lv.mode === 'letter') seq.push(['ls', cur.word], ['w', D.LETTER_KEY[cur.word][0]]);
+    if (lv.mode === 'letter') seq.push(['ls', w.word], ['w', D.LETTER_KEY[w.word][0]]);
     else {
-      gs.forEach((g, i) => gItems(g, mode).forEach((it, j) => seq.push({ k: it[0], id: it[1], on: () => { slots.forEach(s => s.classList.remove('hl')); slots[i].classList.add('hl'); } })));
-      seq.push({ k: 'w', id: cur.word, on: () => slots.forEach(s => s.classList.add('hl')) });
-      seq.push(['p', 'you_spelled'], ['w', cur.word]);
+      gs.forEach((g, i) => gItems(g, mode).forEach(it => seq.push({ k: it[0], id: it[1], on: () => { slots.forEach(s => s.classList.remove('hl')); slots[i].classList.add('hl'); } })));
+      seq.push({ k: 'w', id: w.word, on: () => slots.forEach(s => s.classList.add('hl')) });
+      seq.push(['p', 'you_spelled'], ['w', w.word]);
     }
     seq.push(praise());
     burst(picEl); addPoints(lv.mode === 'letter' ? 3 : 5, picEl);
-    await say(seq, { gap: mode === 'sound' ? 60 : 30 });
+    const myWord = wi;
+    await say(seq, { gap: mode === 'sound' ? 120 : 60 });
+    // progression must never depend on audio finishing normally: only advance if nobody already did (Next)
+    if (!alive || wi !== myWord) return;
     slots.forEach(s => s.classList.remove('hl'));
-    if (!alive) return;
-    await wait(300); busy = false; nextWord();
+    await wait(250); if (alive && wi === myWord) nextWord();
   }
   function finish() {
     alive = false; cancelAnimationFrame(raf);
     let levelUp = false;
-    if ((S.rain.good[lvIdx] || 0) >= 6 && lvIdx < D.RAIN_LEVELS.length - 1 && S.rain.unlocked <= lvIdx) { S.rain.unlocked = lvIdx + 1; S.rain.lv = lvIdx + 1; levelUp = true; }
-    // adaptive: a hard round quietly steps back one level next time (higher levels stay unlocked)
-    if (!levelUp && struggles >= 3 && lvIdx > 0) S.rain.lv = lvIdx - 1;
+    // one clean round (5 words with ≤1 slip each, counted across rounds) opens the next level
+    if ((S.rain.good[lvIdx] || 0) >= 5 && lvIdx < D.RAIN_LEVELS.length - 1 && S.rain.unlocked <= lvIdx) { S.rain.unlocked = lvIdx + 1; S.rain.lv = lvIdx + 1; levelUp = true; }
+    if (!levelUp && struggles >= 3 && lvIdx > 1) S.rain.lv = lvIdx - 1;
     save(); addPoints(3, $('.rainHead'));
-    roundDone(rainPlay, { levelUp });
+    const nl = Math.min(D.RAIN_LEVELS.length - 1, (levelUp ? lvIdx + 1 : lvIdx + 1));
+    roundDone(rainPlay, { levelUp, nextLevel: lvIdx < D.RAIN_LEVELS.length - 1 || levelUp ? () => { S.rain.lv = nl; S.rain.unlocked = Math.max(S.rain.unlocked, nl); save(); rainPlay(); } : null });
   }
   function loop(ts0) {
     if (!alive) return;
     const dt = last ? Math.min(60, ts0 - last) : 16; last = ts0;
     if (!busy) {
       spawnT += dt; idleT += dt;
-      const maxT = lv.mode === 'letter' ? 5 : 6;
-      if (spawnT > 1500 && tiles.filter(t => !t.gone).length < maxT) { spawnT = 0; spawn(); }
-      if (idleT > 9000) { idleT = 0; glowNeeded(); const m = rainVoiceMode(lv, cur); say([['p', 'rain_next']].concat(lv.mode === 'letter' ? [['ls', gs[gi]]] : gItems(gs[gi], m))); }
+      const live = tiles.filter(t => !t.gone).length;
+      const every = live < 3 ? cfg.spawn * .55 : cfg.spawn;
+      if (spawnT > every && live < cfg.maxT) { spawnT = 0; spawn(); }
+      if (idleT > 12000) { idleT = 0; glowNeeded(); const m = rainVoiceMode(lv, cur); say([['p', 'rain_next']].concat(lv.mode === 'letter' ? [['ls', gs[gi]]] : gItems(gs[gi], m))); }
     }
     const H = field.clientHeight;
     tiles = tiles.filter(t => {
@@ -440,8 +596,9 @@ function rainPlay() {
     });
     raf = requestAnimationFrame(loop);
   }
+  nextBtn(el, () => { if (!alive) return; hush(); busy = false; nextWord(); }, 'Next word');
   nextWord(); raf = requestAnimationFrame(loop);
-  window.__rain = { cur: () => cur, need: () => gs[gi], tiles: () => tiles, hit };
+  window.__rain = { cur: () => cur, need: () => gs[gi], tiles: () => tiles, hit, wi: () => wi, cfg };
 }
 
 // ================= STORYBOOK =================
@@ -456,9 +613,8 @@ function reader(si, pi) {
   const st = D.STORIES[si];
   const el = show('reader', topBar(esc(st.title), { back: 'story', backIcon: '📚' }) + `<div class="scene"></div><div class="storyText"></div>
   <div class="readerNav"><button class="navBtn" data-n="-1" aria-label="Back">${E('⬅️')}</button><div class="dots"></div>
-  <button class="navBtn read" data-read aria-label="Read to me">${E('🔊')}</button><div class="dots2"></div><button class="navBtn go" data-n="1" aria-label="Next">${E('➡️')}</button></div>`);
+  <button class="navBtn read" data-read aria-label="Read to me">${E('🔊')}</button><button class="navBtn go big" data-n="1" aria-label="Next">${E('⏭️')}<span>Next</span></button></div>`);
   const scene = $('.scene', el), text = $('.storyText', el);
-  let reading = false;
   function render() {
     const p = st.pages[pi];
     scene.className = 'scene bg-' + p.bg;
@@ -468,16 +624,17 @@ function reader(si, pi) {
     text.innerHTML = toks.map((t, i) => `<span class="word lt" data-i="${i}" data-w="${esc(t.w)}">${esc(t.raw)}</span>`).join('');
     $('.dots', el).innerHTML = st.pages.map((_, i) => `<i class="${i === pi ? 'on' : ''}"></i>`).join('');
     $('[data-n="-1"]', el).disabled = pi === 0;
-    $('[data-n="1"]', el).innerHTML = pi === st.pages.length - 1 ? E('🏁') : E('➡️');
+    $('[data-n="1"]', el).innerHTML = pi === st.pages.length - 1 ? E('🏁') + '<span>End</span>' : E('⏭️') + '<span>Next</span>';
     const key = st.id + '-' + pi;
     if (!S.story.pages[key]) { S.story.pages[key] = 1; save(); addPoints(1, text); }
     lastPrompt = [{ k: 's', id: key }];
-    if (si === 0 && pi === 0 || (pi === 0 && !S.story.read[st.id] && Object.keys(S.story.read).length === 0)) prompt([['p', 'story_tap']]);
+    preload([['s', key]].concat(toks.map(t => ['w', t.w])));
+    if (pi === 0 && Object.keys(S.story.read).length === 0) prompt([['w', st.title], ['p', 'story_tap']]);
     else if (pi === 0) say(['w', st.title]);
   }
   text.addEventListener('pointerdown', (e) => {
     const w = e.target.closest('.word'); if (!w || !w.dataset.w) return;
-    reading = false; SFX.tap(); $$('.word', text).forEach(x => x.classList.remove('hl'));
+    SFX.tap(); $$('.word', text).forEach(x => x.classList.remove('hl'));
     w.classList.add('tap'); setTimeout(() => w.classList.remove('tap'), 600);
     say(['w', w.dataset.w]);
   });
@@ -485,25 +642,41 @@ function reader(si, pi) {
   $('[data-read]', el).addEventListener('click', () => readToMe());
   function readToMe() {
     SFX.tap(); const key = st.id + '-' + pi, tim = M.pages[key] || []; const words = $$('.word', text);
-    reading = true;
     say([{ k: 's', id: key, time: (ms) => { words.forEach((w, i) => w.classList.toggle('hl', !!tim[i] && ms >= tim[i][0] - 40 && (ms < (tim[i + 1] ? tim[i + 1][0] - 40 : tim[i][1] + 300)))); } }])
-      .then(() => { words.forEach(w => w.classList.remove('hl')); reading = false; });
+      .then(() => { words.forEach(w => w.classList.remove('hl')); });
   }
   $$('[data-n]', el).forEach(b => b.addEventListener('click', () => {
     const n = +b.dataset.n; SFX.whoosh();
     if (n > 0 && pi === st.pages.length - 1) return storyEnd();
     pi = Math.max(0, Math.min(st.pages.length - 1, pi + n)); hush(); render();
+    if (n > 0 && pi > 0) say(['p', 'next']);
   }));
   function storyEnd() {
     const first = !S.story.read[st.id]; S.story.read[st.id] = (S.story.read[st.id] || 0) + 1; S.log.stories++; save();
     addPoints(first ? 10 : 4, $('.scene'));
     SFX.tada();
-    const o = overlay(`<div class="huge emoji">${st.cover}</div><h2>The End!</h2><div class="row"><button class="navBtn go" data-a="again" aria-label="Read again">${E('🔁')}</button><button class="navBtn" data-a="shelf" aria-label="More stories">${E('📚')}</button><button class="navBtn" data-a="home" aria-label="Home">${E('🏠')}</button></div>`);
+    const nxt = (si + 1) % D.STORIES.length;
+    const o = overlay(`<div class="huge emoji">${st.cover}</div><h2>The End!</h2><div class="row"><button class="navBtn go" data-a="again" aria-label="Read again">${E('🔁')}</button><button class="navBtn next" data-a="next" aria-label="Next story">${E('⏭️')}</button><button class="navBtn" data-a="shelf" aria-label="More stories">${E('📚')}</button><button class="navBtn" data-a="home" aria-label="Home">${E('🏠')}</button></div>`);
     burst($('.huge', o)); lastPrompt = ['p', 'the_end']; say(['p', 'the_end']);
-    o.addEventListener('click', (e) => { const b = e.target.closest('[data-a]'); if (!b) return; SFX.tap(); o.remove(); ({ again: () => reader(si, 0), shelf, home })[b.dataset.a](); });
+    o.addEventListener('click', (e) => { const b = e.target.closest('[data-a]'); if (!b) return; SFX.tap(); o.remove(); ({ again: () => reader(si, 0), next: () => reader(nxt, 0), shelf, home })[b.dataset.a](); });
   }
   render();
   window.__reader = { readToMe, page: () => pi };
+}
+
+// ================= shared: silly combo scene =================
+function buildScene(host, c) {
+  const n = c.plural ? 3 : 1, mod = c.adj ? 'mod-' + c.adj.a : '';
+  const tag = c.adj && { happy: ['😄', 'top:-10%;right:-10%'], sleepy: ['💤', 'top:-10%;right:-10%'], fast: ['💨', 'top:30%;left:-30%'] }[c.adj.a];
+  const sc = document.createElement('div'); sc.className = 'showtime bg-' + (c.place ? c.place.bg : (c.bg || 'grass'));
+  sc.innerHTML = `<div class="stage">${c.place ? `<div class="placeE emoji" style="left:8%;top:12%">${c.place.e}</div>` : ''}
+    ${Array.from({ length: n }, (_, i) => `<div class="actor ${mod}" style="left:${n > 1 ? 25 + i * 25 : 50}%"><span><span class="emoji">${c.noun.e}</span></span>${tag ? `<span class="tag emoji" style="${tag[1]}">${tag[0]}</span>` : ''}</div>`).join('')}</div>
+    <div class="sentence lt">${c.text.split(' ').map((w, i) => `<span class="sw" data-i="${i}">${esc(w)}</span>`).join(' ')}</div>`;
+  host.appendChild(sc);
+  const actors = $$('.actor', sc), stage = $('.stage', sc);
+  sc.act = () => Promise.all(actors.map((a, i) => wait(i * 150).then(() => anim(a.firstElementChild, c.verb.a, stage))));
+  sc.hl = (i) => $$('.sw', sc).forEach((s, j) => s.classList.toggle('hl', j === i));
+  return sc;
 }
 
 // ================= WORD RACE =================
@@ -513,52 +686,55 @@ function raceMap() {
   prompt([['p', 'm_race'], ['p', 'pick_level']]);
 }
 const CAR_COLORS = ['cBlue', 'cRed', 'cGreen', 'cPurple', 'cOrange', 'cTeal'];
+function raceOptions(slot, n) {
+  n = n || 3;
+  if (slot === 'The') return [{ w: 'The', say: 'the' }];
+  if (slot === 'can') return [{ w: 'can', say: 'can' }];
+  if (slot === 'noun') return shuffle(D.RACE_NOUNS).slice(0, n).map(x => ({ w: x.s, say: x.s, noun: x }));
+  if (slot === 'nounP') return shuffle(D.RACE_NOUNS.filter(x => x.p !== x.s)).slice(0, n).map(x => ({ w: x.p, say: x.p, noun: x, plural: true }));
+  if (slot === 'verbB') return shuffle(D.RACE_VERBS).slice(0, n).map(v => ({ w: v.b, say: v.b, verb: v }));
+  if (slot === 'verbS') return shuffle(D.RACE_VERBS).slice(0, n).map(v => ({ w: v.s, say: v.s, verb: v }));
+  if (slot === 'adj') return shuffle(D.RACE_ADJS).slice(0, n).map(a => ({ w: a.w, say: a.w, adj: a }));
+  if (slot === 'place') return shuffle(D.RACE_PLACES).slice(0, n).map(p => ({ w: p.w, say: p.w, place: p }));
+  return [];
+}
 function racePlay() {
   const lvIdx = S.race.lv, L = D.RACE_LEVELS[lvIdx];
-  let round = 0, chosen = [], si = 0, alive = true, noun = null;
-  const el = show('race', topBar(`${E('🏎️')} ${esc(L.name)}`, { back: 'race', backIcon: '⬅️' }) + `<div class="raceStage"><div class="track"></div></div><div class="garage"></div>`);
-  const track = $('.track', el), garage = $('.garage', el), stage = $('.raceStage', el);
+  let round = 0, chosen = [], si = 0, alive = true, finishing = false, sentenceId = 0;
+  const el = show('race', topBar(`${E('🏎️')} ${esc(L.name)}`, { back: 'race', backIcon: '⬅️' }) + `<div class="raceStage"><div class="track"></div></div><div class="garageWrap"><div class="garage"></div><button class="refreshBtn" aria-label="New words">${E('🔄')}</button></div>`);
+  const track = $('.track', el), garage = $('.garage', el), refresh = $('.refreshBtn', el);
   cleanup = () => { alive = false; };
-  function options(slot) {
-    if (slot === 'The') return [{ w: 'The', say: 'the' }];
-    if (slot === 'can') return [{ w: 'can', say: 'can' }];
-    if (slot === 'noun') return shuffle(D.RACE_NOUNS).slice(0, 3).map(n => ({ w: n.s, say: n.s, noun: n }));
-    if (slot === 'nounP') return shuffle(D.RACE_NOUNS.filter(n => n.p !== n.s)).slice(0, 3).map(n => ({ w: n.p, say: n.p, noun: n, plural: true }));
-    if (slot === 'verbB') return shuffle(D.RACE_VERBS).slice(0, 3).map(v => ({ w: v.b, say: v.b, verb: v }));
-    if (slot === 'verbS') return shuffle(D.RACE_VERBS).slice(0, 3).map(v => ({ w: v.s, say: v.s, verb: v }));
-    if (slot === 'adj') return shuffle(D.RACE_ADJS).slice(0, 3).map(a => ({ w: a.w, say: a.w, adj: a }));
-    if (slot === 'place') return shuffle(D.RACE_PLACES).slice(0, 3).map(p => ({ w: p.w, say: p.w, place: p }));
-    return [];
-  }
   const disp = (o, i) => { let w = o.w; if (i === 0) w = w[0].toUpperCase() + w.slice(1); return w; };
   function newSentence() {
-    chosen = []; si = 0;
+    $$('.showtime', el).forEach(s => s.remove());
+    chosen = []; si = 0; finishing = false; sentenceId++;
     track.innerHTML = L.slots.map((_, i) => `<div class="spot ${i === 0 ? 'cur' : ''}" data-i="${i}"></div>`).join('');
     showChoices();
     prompt(round === 0 ? [['p', 'race_intro'], ['p', 'race_pick']] : [['p', 'race_pick']]);
   }
   function showChoices() {
     $$('.hand', el).forEach(h => h.remove());
-    const opts = options(L.slots[si]);
+    const opts = raceOptions(L.slots[si]);
+    refresh.style.visibility = opts.length > 1 ? 'visible' : 'hidden';
     garage.innerHTML = '';
     opts.forEach((o, i) => {
-      const c = document.createElement('div'); c.className = 'car lt ' + CAR_COLORS[(si * 2 + i) % CAR_COLORS.length];
+      const c = document.createElement('div'); c.className = 'car lt ' + CAR_COLORS[(si * 2 + i + rnd(3)) % CAR_COLORS.length];
       c.innerHTML = `<span class="win"></span>${esc(disp(o, si))}`; c._o = o; garage.appendChild(c); dragCar(c);
     });
+    preload(opts.map(o => ['w', o.say]));
     if (round === 0 && si === 0) { const h = document.createElement('div'); h.className = 'hand emoji'; h.textContent = '👆'; const r = garage.firstChild.getBoundingClientRect(), s = el.getBoundingClientRect(); h.style.left = (r.left - s.left + r.width / 2) + 'px'; h.style.top = (r.bottom - s.top) + 'px'; el.appendChild(h); }
   }
+  refresh.addEventListener('click', () => { if (finishing) return; SFX.whoosh(); anim(refresh, 'spin'); showChoices(); say(['p', 'new_words']); });
   function dragCar(c) {
     let sx, sy, ox, oy, moved = false, down = false;
     c.addEventListener('pointerdown', (e) => {
       e.preventDefault(); down = true; moved = false; sx = e.clientX; sy = e.clientY;
       const r = c.getBoundingClientRect(); ox = sx - r.left; oy = sy - r.top;
       try { c.setPointerCapture(e.pointerId); } catch (er) {}
-      SFX.tap(); say(['w', c._o.say]);
-      if (c.classList.contains('sel')) { c._tapSend = true; } else { $$('.car.sel', garage).forEach(x => x.classList.remove('sel')); c.classList.add('sel'); c._tapSend = false; }
     });
     c.addEventListener('pointermove', (e) => {
       if (!down) return; const dx = e.clientX - sx, dy = e.clientY - sy;
-      if (!moved && Math.hypot(dx, dy) > 12) { moved = true; c.classList.add('dragging'); c.style.position = 'fixed'; c.style.margin = 0; }
+      if (!moved && Math.hypot(dx, dy) > 12) { moved = true; c.classList.add('dragging'); c.style.position = 'fixed'; c.style.margin = 0; say(['w', c._o.say]); }
       if (moved) { c.style.left = (e.clientX - ox) + 'px'; c.style.top = (e.clientY - oy) + 'px'; const tr = track.getBoundingClientRect(); track.classList.toggle('drop', e.clientY < tr.bottom + 40); }
     });
     const up = (e) => {
@@ -567,122 +743,181 @@ function racePlay() {
         const tr = track.getBoundingClientRect();
         c.classList.remove('dragging'); c.style.position = ''; c.style.left = ''; c.style.top = '';
         if (e.clientY < tr.bottom + 40) place(c); else SFX.boing();
-      } else if (c._tapSend) place(c);
+      } else place(c); // one tap = drive onto the road (the word is read as it parks)
     };
-    c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+    c.addEventListener('pointerup', up); c.addEventListener('pointercancel', (e) => { if (down && moved) up(e); down = false; });
   }
-  async function place(c) {
-    if (!alive) return;
-    const o = c._o; chosen.push(o); if (o.noun) noun = o;
+  function place(c) {
+    if (!alive || finishing || !c.parentNode || c.parentNode !== garage) return;
+    const o = c._o; chosen.push(o);
     $$('.hand', el).forEach(h => h.remove());
     const spot = track.children[si]; spot.classList.remove('cur'); spot.classList.add('filled');
     c.classList.remove('sel'); spot.appendChild(c); SFX.vroom(); anim(c, 'jump2');
     garage.innerHTML = ''; si++;
-    if (si < L.slots.length) { track.children[si].classList.add('cur'); showChoices(); }
-    else await finishSentence();
+    if (si < L.slots.length) { say(['w', o.say]); track.children[si].classList.add('cur'); showChoices(); }
+    else finishSentence();
   }
   async function finishSentence() {
-    const cars = $$('.car', track);
-    await say(['p', 'race_go']); if (!alive) return;
-    await say(chosen.map((o, i) => ({ k: 'w', id: o.say, on: () => { cars.forEach(x => x.classList.remove('reading')); void cars[i].offsetWidth; cars[i].classList.add('reading'); } })), { gap: 90 });
-    if (!alive) return;
+    finishing = true; refresh.style.visibility = 'hidden';
+    const my = sentenceId, cars = $$('.car', track), words = chosen.map(o => o.say);
+    const still = () => alive && my === sentenceId;
+    // 1) read the finished sentence right away, gapless, each car hopping on its word
+    await say(words.map((w, i) => ({ k: 'w', id: w, on: () => { cars.forEach(x => x.classList.remove('reading')); void cars[i].offsetWidth; cars[i].classList.add('reading'); } })), { gap: 70 });
+    if (!still()) return;
     SFX.vroom(); cars.forEach((c, i) => setTimeout(() => c.classList.add('vroom'), i * 60));
-    await wait(900); if (!alive) return;
-    // act it out
+    await wait(650); if (!still()) return;
+    // 2) the silly combo picture acts it out while the sentence is read again
     const nounO = chosen.find(o => o.noun), verbO = chosen.find(o => o.verb), adjO = chosen.find(o => o.adj), placeO = chosen.find(o => o.place);
-    const sentence = chosen.map((o, i) => disp(o, i)).join(' ') + (chosen.length > 2 ? '.' : '!');
-    const bg = placeO ? placeO.place.bg : pick(['grass', 'sunny', 'road']);
-    const n = nounO.plural ? 3 : 1;
-    const show_ = document.createElement('div'); show_.className = 'showtime bg-' + bg;
-    show_.innerHTML = `<div class="stage">${placeO ? `<div class="placeE emoji" style="left:8%;top:12%">${placeO.place.e}</div>` : ''}
-      ${Array.from({ length: n }, (_, i) => `<div class="actor ${adjO ? 'mod-' + adjO.adj.a : ''}" style="left:${n > 1 ? 25 + i * 25 : 50}%"><span><span class="emoji">${nounO.noun.e}</span></span>${adjO && adjO.adj.a === 'happy' ? '<span class="tag emoji" style="top:-10%;right:-10%">😄</span>' : ''}${adjO && adjO.adj.a === 'sleepy' ? '<span class="tag emoji" style="top:-10%;right:-10%">💤</span>' : ''}${adjO && adjO.adj.a === 'fast' ? '<span class="tag emoji" style="top:30%;left:-30%">💨</span>' : ''}</div>`).join('')}</div>
-      <div class="sentence lt">${esc(sentence)}</div>`;
-    el.appendChild(show_);
-    const actors = $$('.actor', show_);
-    const doAct = () => actors.forEach((a, i) => setTimeout(() => anim(a.firstElementChild, verbO.verb.a, $('.stage', show_)), i * 150));
-    doAct(); const words = chosen.map(o => o.say);
-    await say(words.map((w, i) => ({ k: 'w', id: w, on: i === words.length - 1 ? doAct : null })), { gap: 40 });
-    if (!alive) return;
+    const text = chosen.map((o, i) => disp(o, i)).join(' ') + (chosen.length > 2 ? '.' : '!');
+    const sc = buildScene(el, { noun: nounO.noun, plural: nounO.plural, adj: adjO && adjO.adj, verb: verbO.verb, place: placeO && placeO.place, bg: pick(['grass', 'sunny', 'road']), text });
+    const acting = sc.act();
+    await say(words.map((w, i) => ({ k: 'w', id: w, on: () => sc.hl(i) })), { gap: 70 });
+    await acting; if (!still()) return;
+    sc.hl(-1);
     S.log.sentences++; S.race.done++; S.race.good[lvIdx] = (S.race.good[lvIdx] || 0) + 1; save();
-    addPoints(5, show_); await say([praise()]); await wait(700);
-    if (!alive) return;
-    show_.remove(); round++;
+    addPoints(5, sc); await say([praise()]); await wait(500);
+    if (!still()) return;
+    round++;
     if (round >= 4) {
       let levelUp = false;
-      if (S.race.good[lvIdx] >= 6 && lvIdx < D.RACE_LEVELS.length - 1 && S.race.unlocked <= lvIdx) { S.race.unlocked = lvIdx + 1; S.race.lv = lvIdx + 1; levelUp = true; }
-      save(); roundDone(racePlay, { levelUp });
+      if (S.race.good[lvIdx] >= 4 && lvIdx < D.RACE_LEVELS.length - 1 && S.race.unlocked <= lvIdx) { S.race.unlocked = lvIdx + 1; S.race.lv = lvIdx + 1; levelUp = true; }
+      save();
+      const nl = lvIdx + 1;
+      roundDone(racePlay, { levelUp, nextLevel: nl < D.RACE_LEVELS.length ? () => { S.race.lv = nl; S.race.unlocked = Math.max(S.race.unlocked, nl); save(); racePlay(); } : null });
     } else newSentence();
   }
+  nextBtn(el, () => { if (!alive) return; hush(); round = Math.min(round, 3); newSentence(); }, 'Next sentence');
   newSentence();
-  window.__race = { place: () => { const c = garage.firstChild; if (c) place(c); }, si: () => si };
+  window.__race = { place: () => { const c = garage.firstChild; if (c) place(c); }, si: () => si, refresh: () => refresh.click() };
 }
 
 // ================= ACTION WORDS =================
+const ACT_OF = {}; D.ACTIONS.forEach(a => { ACT_OF[a.w] = a.a; });
 function actionHome(mode) {
   mode = mode || 'explore';
   const el = show('action', topBar('Action Words') + `<div class="actModes">
     <button class="modeBtn ${mode === 'explore' ? 'on' : ''}" data-m="explore">${E('🎈')}<span>Play</span></button>
     <button class="modeBtn ${mode === 'match' ? 'on' : ''}" data-m="match">${E('🎯')}<span>Match</span></button>
-    <button class="modeBtn ${mode === 'phrase' ? 'on' : ''}" data-m="phrase">${E('📜')}<span>Read & Do</span></button></div>
+    <button class="modeBtn ${mode === 'phrase' ? 'on' : ''}" data-m="phrase">${E('📜')}<span>Read & Do</span></button>
+    <button class="modeBtn ${mode === 'mix' ? 'on' : ''}" data-m="mix">${E('🔀')}<span>Mix</span></button></div>
     <div class="actStage"><div class="buddy"><span class="emoji">🐉</span></div></div><div class="actWords"></div>`);
-  $$('.modeBtn', el).forEach(b => b.addEventListener('click', () => { SFX.pop(); actionHome(b.dataset.m); say(['p', { explore: 'action_explore', match: 'action_match_btn', phrase: 'action_phrase_btn' }[b.dataset.m]]); }));
+  $$('.modeBtn', el).forEach(b => b.addEventListener('click', () => { SFX.pop(); actionHome(b.dataset.m); }));
   const stage = $('.actStage', el), buddy = $('.buddy', el), words = $('.actWords', el);
-  let alive = true; cleanup = () => { alive = false; };
+  let alive = true; cleanup = () => { alive = false; clearInterval(stage._iv); };
   buddy.addEventListener('click', () => { SFX.boing(); anim(buddy, 'jump', stage); });
   if (mode === 'explore') {
-    const list = S.act.lv === 0 ? D.ACTIONS.slice(0, 10) : D.ACTIONS;
-    words.innerHTML = list.map(a => `<button class="aw lt" data-w="${a.w}" data-a="${a.a}"><span>${a.w}</span></button>`).join('');
-    $$('.aw', words).forEach(b => b.addEventListener('click', () => {
-      SFX.pop(); say(['w', b.dataset.w]); anim(b, b.dataset.a, words); setTimeout(() => anim(buddy, b.dataset.a, stage), 250);
-      if (!S.act.seen[b.dataset.w]) { S.act.seen[b.dataset.w] = 1; save(); addPoints(1, b); }
-    }));
-    setTimeout(() => prompt([['p', 'm_action'], ['p', 'action_intro']]), 50);
+    const all = S.act.lv === 0 ? D.ACTIONS.slice(0, 12) : D.ACTIONS;
+    const deal = () => {
+      const list = shuffle(all).slice(0, 8);
+      words.innerHTML = list.map(a => `<button class="aw lt" data-w="${a.w}" data-a="${a.a}"><span>${a.w}</span></button>`).join('');
+      preload(list.map(a => ['w', a.w]));
+      $$('.aw', words).forEach(b => b.addEventListener('click', () => {
+        SFX.pop(); say(['w', b.dataset.w]); anim(b, b.dataset.a, words); setTimeout(() => anim(buddy, b.dataset.a, stage), 250);
+        if (!S.act.seen[b.dataset.w]) { S.act.seen[b.dataset.w] = 1; save(); addPoints(1, b); }
+      }));
+    };
+    deal();
+    nextBtn(el, deal, 'New words');
+    prompt([['p', 'm_action'], ['p', 'action_intro']]);
   } else if (mode === 'match') {
-    let n = 0, firstTry = true, target;
+    let n = 0, firstTry = true, target, qid = 0;
     const nChoices = [2, 3, 4, 4][S.act.lv] || 3;
     const next = () => {
       if (!alive) return;
-      if (n >= 6) { const levelUp = S.act.good >= 10 && S.act.lv < 3 && (S.act.good = 0, S.act.lv++, true); save(); return roundDone(() => actionHome('match'), { levelUp }); }
-      n++; firstTry = true;
+      clearInterval(stage._iv);
+      if (n >= 6) {
+        const levelUp = S.act.good >= 8 && S.act.lv < 3 && (S.act.good = 0, S.act.lv++, true); save();
+        return roundDone(() => actionHome('match'), { levelUp, nextLevel: S.act.lv < 3 ? () => { S.act.lv++; save(); actionHome('match'); } : null });
+      }
+      n++; firstTry = true; const my = ++qid;
       const pool = S.act.lv === 0 ? D.ACTIONS.slice(0, 10) : D.ACTIONS;
       target = pick(pool); const opts = shuffle([target].concat(shuffle(pool.filter(a => a.w !== target.w && a.a !== target.a)).slice(0, nChoices - 1)));
       words.innerHTML = opts.map(a => `<button class="aw big3 lt" data-w="${a.w}" data-a="${a.a}"><span>${a.w}</span></button>`).join('');
-      const loopAnim = () => { if (alive && words.contains(document.activeElement) === false) anim(buddy, target.a, stage); };
-      anim(buddy, target.a, stage); clearInterval(stage._iv); stage._iv = setInterval(() => alive && target && anim(buddy, target.a, stage), 3200);
-      void loopAnim;
+      preload(opts.map(a => ['w', a.w]));
+      anim(buddy, target.a, stage); stage._iv = setInterval(() => alive && target && anim(buddy, target.a, stage), 3400);
       prompt([['p', 'action_match']]);
       $$('.aw', words).forEach(b => b.addEventListener('click', async () => {
+        if (!target || my !== qid) return;
         if (b.dataset.w === target.w) {
           clearInterval(stage._iv); SFX.chime(); b.classList.add('right'); anim(b, b.dataset.a, words); burst(b);
           S.log.matches++; if (firstTry) S.act.good++; S.act.done++; save(); addPoints(firstTry ? 3 : 1, b);
-          const tg = target; target = null; await say([['w', tg.w], praise()]); if (alive) setTimeout(next, 400);
+          const tg = target; target = null; await say([['w', tg.w], praise()]); if (alive && my === qid) setTimeout(() => { if (my === qid) next(); }, 400);
         } else {
           SFX.boing(); firstTry = false; b.classList.add('wrongish'); anim(b, b.dataset.a, words);
           say([['p', 'that_says'], ['w', b.dataset.w], oops()]);
         }
       }));
     };
-    cleanup = () => { alive = false; clearInterval(stage._iv); };
+    nextBtn(el, () => { target = null; next(); }, 'Next one');
     next();
-  } else {
+  } else if (mode === 'phrase') {
     const list = D.ACTION_PHRASES.slice(0, S.act.lv >= 2 ? D.ACTION_PHRASES.length : 6 + S.act.lv * 3);
-    let n = 0;
+    let n = 0, pid = 0, lastPh = null;
     const next = () => {
       if (!alive) return;
       if (n >= 5) return roundDone(() => actionHome('phrase'));
-      n++; const ph = pick(list);
-      words.innerHTML = `<div class="phrase">${ph.w.split(' ').map(w => `<button class="aw big3 lt" data-w="${w}"><span>${w}</span></button>`).join('')}<button class="goBtn" aria-label="Go">${E('▶️')}</button></div>`;
-      $$('.aw', words).forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.dataset.w]); anim(b, 'jump2', words); }));
-      let did = false;
+      n++; const my = ++pid;
+      let ph; do { ph = pick(list); } while (ph === lastPh && list.length > 1); lastPh = ph;
+      const ws = ph.w.split(' ');
+      words.innerHTML = `<div class="phrase">${ws.map(w => `<button class="aw big3 lt" data-w="${w}"><span>${w}</span></button>`).join('')}<button class="goBtn" aria-label="Go">${E('▶️')}</button></div>`;
+      preload(ws.map(w => ['w', w]));
+      const bs = $$('.aw', words), hl = (i) => bs.forEach((b, j) => b.classList.toggle('hl', j === i));
+      bs.forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.dataset.w]); anim(b, 'jump2', words); }));
+      let did = false, running = false;
       $('.goBtn', words).addEventListener('click', async () => {
-        SFX.whoosh(); const bs = $$('.aw', words);
-        await say(ph.w.split(' ').map((w, i) => ({ k: 'w', id: w, on: () => anim(bs[i], 'jump2', words) })), { gap: 60 });
-        for (const a of ph.a) { if (!alive) return; anim(buddy, a, stage); await wait(1900); }
-        if (!did) { did = true; addPoints(2, buddy); S.log.matches++; save(); await say([praise()]); setTimeout(next, 300); }
+        if (running) return; running = true; SFX.whoosh();
+        const still = () => alive && my === pid;
+        // 1) read the whole phrase (gapless), lighting each word
+        await say(ws.map((w, i) => ({ k: 'w', id: w, on: () => hl(i) })), { gap: 80 });
+        if (!still()) return;
+        // 2) then do each action word fully, one after the other: light it, say it, act it
+        for (let i = 0; i < ws.length; i++) {
+          const a = ACT_OF[ws[i]]; if (!a) continue;
+          if (!still()) return;
+          hl(i); say(['w', ws[i]]);
+          await anim(buddy, a, stage);
+          await wait(300);
+        }
+        hl(-1); running = false;
+        if (!still()) return;
+        if (!did) { did = true; addPoints(2, buddy); S.log.matches++; save(); await say([praise()]); if (still()) setTimeout(() => { if (my === pid) next(); }, 400); }
       });
       prompt([['p', 'action_phrase']]);
     };
+    nextBtn(el, next, 'Next phrase');
     next();
+  } else {
+    // ---- Mix: build a silly combo, refresh any word type, or shuffle them all ----
+    const pickNoun = () => pick(D.RACE_NOUNS), pickAdj = () => pick(D.RACE_ADJS), pickVerb = () => pick(D.RACE_VERBS), pickPlace = () => pick(D.RACE_PLACES);
+    const c = { adj: pickAdj(), noun: pickNoun(), verb: pickVerb(), place: pickPlace() };
+    const TYPES = [['adj', '🎨', pickAdj, x => x.w], ['noun', '🐾', pickNoun, x => x.s], ['verb', '🏃', pickVerb, x => x.s], ['place', '📍', pickPlace, x => x.w]];
+    stage.innerHTML = '';
+    let playing = 0;
+    const words4 = () => ['the', c.adj.w, c.noun.s, c.verb.s, c.place.w];
+    const text = () => 'The ' + c.adj.w + ' ' + c.noun.s + ' ' + c.verb.s + ' ' + c.place.w + '.';
+    function draw() {
+      stage.innerHTML = '';
+      const sc = buildScene(stage, { noun: c.noun, adj: c.adj, verb: c.verb, place: c.place, text: text() }); sc.classList.add('inStage');
+      words.innerHTML = `<div class="mixRow">${TYPES.map(([k, icon, , txt]) => `<div class="mixCol"><button class="aw lt" data-k="${k}"><span>${esc(txt(c[k]))}</span></button><button class="refreshBtn small" data-r="${k}" aria-label="New ${k}">${E('🔄')}</button></div>`).join('')}
+        <div class="mixCol"><button class="goBtn" aria-label="Go">${E('▶️')}</button><button class="refreshBtn small all" data-all aria-label="Shuffle all">${E('🔀')}</button></div></div>`;
+      preload(words4().map(w => ['w', w]));
+      $$('[data-k]', words).forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.textContent]); anim(b, 'jump2', words); }));
+      $$('[data-r]', words).forEach(b => b.addEventListener('click', () => { SFX.whoosh(); const t = TYPES.find(x => x[0] === b.dataset.r); let v; do { v = t[2](); } while (v === c[t[0]]); c[t[0]] = v; draw(); say(['w', t[3](v)]); }));
+      $('[data-all]', words).addEventListener('click', shuffleAll);
+      $('.goBtn', words).addEventListener('click', () => go(sc));
+      return sc;
+    }
+    async function go(sc) {
+      const my = ++playing; SFX.whoosh();
+      const acting = sc.act();
+      await say(words4().map((w, i) => ({ k: 'w', id: w, on: () => sc.hl(i) })), { gap: 70 });
+      await acting; if (my !== playing || !alive) return;
+      sc.hl(-1); addPoints(2, sc); say([praise()]);
+    }
+    function shuffleAll() { SFX.whoosh(); c.adj = pickAdj(); c.noun = pickNoun(); c.verb = pickVerb(); c.place = pickPlace(); const sc = draw(); say(['p', 'shuffle']); setTimeout(() => go(sc), 700); }
+    draw();
+    nextBtn(el, shuffleAll, 'Shuffle all');
+    prompt([['p', 'action_mix']]);
   }
 }
 
@@ -732,6 +967,6 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('dblclick', e => e.preventDefault());
 document.addEventListener('touchmove', e => { if (!e.target.closest('.shop, .roomTabs, .card')) e.preventDefault(); }, { passive: false });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hush(); });
-window.__app = { S: () => S, save, go, addPoints, say, AU, D, reader, gallery, actionHome, rainPlay, racePlay };
+window.__app = { S: () => S, save, go, addPoints, say, AU, D, reader, gallery, actionHome, rainPlay, racePlay, speakable, clip, loadBuf, anim };
 start();
 })();

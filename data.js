@@ -217,7 +217,9 @@
     parent:'Grown ups only!',
     p1:'Great job!', p2:'You did it!', p3:'Awesome reading!', p4:'Super!', p5:'Way to go!', p6:"You're a reading star!", p7:'High five!', p8:'Wow! Nice work!', p9:'Hooray!', p10:'Amazing!',
     t1:'Oops! Try again.', t2:'Almost! Try another one.', t3:'Nice try! Look again.', t4:"That's okay! Keep looking.",
-    letter_name:'Its name is', letter_sound:'It says'
+    letter_name:'Its name is', letter_sound:'It says',
+    next:'Next!', next_level:'Next level!', new_words:'New words!', shuffle:'Shuffle!', action_mix_btn:'Mix',
+    action_mix:'Mix and match! Change a word, then tap go!'
   };
 
   const DATA = { LETTERS, LETTER_NAME_TEXT, LETTER_KEY, DIGRAPHS, RAIN_LEVELS, STORIES, RACE_NOUNS, RACE_VERBS, RACE_ADJS, RACE_PLACES, RACE_LEVELS, ACTIONS, ACTION_PHRASES, ROOMS, PHRASES };

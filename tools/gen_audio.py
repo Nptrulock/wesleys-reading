@@ -78,8 +78,22 @@ async def tts(text, out, rate='-5%', bounds=False):
 
 TRIM = 'silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.02,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.03,areverse'
 def ff(args): subprocess.run(['ffmpeg', '-y', '-loglevel', 'error'] + args, check=True)
+import numpy as np
+def pcm(src):
+    r = subprocess.run(['ffmpeg', '-loglevel', 'error', '-i', src, '-f', 's16le', '-ac', '1', '-ar', '24000', '-'], capture_output=True, check=True)
+    return np.frombuffer(r.stdout, np.int16).astype(np.float32) / 32768
 def trim(src, dst):
-    ff(['-i', src, '-af', TRIM + ',apad=pad_dur=0.04', '-ac', '1', '-ar', '24000', '-b:a', '48k', dst])
+    # Energy-based trim (v2). v1 used ffmpeg silenceremove, which on some clips (e.g. "cats") removed
+    # the whole word and left 0.1 s of silence. Here: find the first/last 10 ms frame within 35 dB of
+    # the peak, keep 60 ms before and 150 ms after, never cut inside speech.
+    a = pcm(src); sr = 24000; win = 240
+    fr = np.array([np.sqrt(np.mean(a[i:i + win] ** 2)) for i in range(0, max(1, len(a) - win), win)]) + 1e-9
+    db = 20 * np.log10(fr); thr = db.max() - 35
+    idx = np.where(db > thr)[0]
+    s0 = max(0, idx[0] * win - int(.06 * sr)); s1 = min(len(a), (idx[-1] + 1) * win + int(.15 * sr))
+    ff(['-ss', '%.3f' % (s0 / sr), '-t', '%.3f' % ((s1 - s0) / sr), '-i', src, '-af', 'afade=t=out:st=%.3f:d=0.05' % max(0, (s1 - s0) / sr - .05), '-ac', '1', '-ar', '24000', '-b:a', '48k', dst])
+    b = pcm(dst)
+    if len(b) < .18 * sr or np.abs(b).max() < .1: raise RuntimeError('trim check failed for ' + dst)
 
 async def make_word(key, text, folder, rate='-5%'):
     dst = os.path.join(A, folder, key + '.mp3')

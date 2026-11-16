@@ -296,3 +296,34 @@ button { font-family: inherit; color: inherit; border: 0; background: none; padd
 .showtime { position: absolute; inset: calc(var(--sat) + 14vmin) calc(var(--sar) + 1.6vmin) calc(var(--sab) + 1.6vmin) calc(var(--sal) + 1.6vmin); }
 .showtime .actor { top: 55%; }
 .showtime .sentence { font-size: 7vmin; }
+
+/* ---------- v2 ---------- */
+.nextBtn { position: absolute; right: calc(var(--sar) + 2vmin); bottom: calc(var(--sab) + 2vmin); z-index: 45; display: flex; align-items: center; gap: 1vmin;
+  background: #43a047; color: #fff; font-weight: 700; font-size: 4.4vmin; padding: 1.4vmin 3vmin 1.4vmin 2vmin; border-radius: 99px; min-height: 64px; min-width: 120px;
+  box-shadow: 0 1vmin 0 #1b5e20; }
+.nextBtn .emoji { font-size: 6vmin; }
+.nextBtn:active { transform: translateY(.8vmin); box-shadow: 0 .2vmin 0 #1b5e20; }
+.nextBtn.bump { animation: bump .5s; }
+#rain .nextBtn { background: rgba(67,160,71,.92); }
+.navBtn.big { width: auto; padding: 0 3vmin; gap: 1vmin; display: flex; align-items: center; color: #fff; font-weight: 700; font-size: 4.4vmin; }
+.navBtn.big .emoji { font-size: 6.4vmin; }
+.navBtn.next { background: #43a047; }
+.garageWrap { flex: 1; display: flex; align-items: center; justify-content: center; gap: 3vmin; min-height: 0; padding-bottom: 12vmin; }
+.garageWrap .garage { flex: 0 1 auto; }
+.refreshBtn { width: 13vmin; height: 13vmin; min-width: 60px; min-height: 60px; border-radius: 50%; background: #fff; font-size: 7vmin; display: grid; place-items: center; box-shadow: 0 1vmin 0 rgba(0,0,0,.18); flex: none; }
+.refreshBtn.small { width: 10vmin; height: 10vmin; min-width: 50px; min-height: 50px; font-size: 5.4vmin; }
+.refreshBtn.all { background: #ffeb3b; }
+.aw.hl { background: #ffeb3b; transform: translateY(-.8vmin) scale(1.08); transition: transform .15s, background .15s; }
+.showtime .sw { display: inline-block; padding: 0 .8vmin; border-radius: 1.4vmin; transition: background .12s; }
+.showtime .sw.hl { background: #ffeb3b; }
+.showtime.inStage { inset: 0; border-radius: 0; animation: none; }
+.showtime.inStage .actor { font-size: 15vmin; top: 50%; }
+.showtime.inStage .sentence { font-size: 5vmin; padding: 1.2vmin; }
+.mixRow { display: flex; gap: 1.6vmin; justify-content: center; align-items: flex-start; flex-wrap: wrap; padding-right: 0; }
+.mixCol { display: flex; flex-direction: column; align-items: center; gap: 1.4vmin; }
+.mixRow .aw { font-size: 5vmin; min-width: 14vmin; padding: 1.4vmin 2vmin; }
+.mixRow .goBtn { width: 11vmin; height: 11vmin; min-width: 56px; min-height: 56px; font-size: 5.4vmin; }
+#action .actWords { padding-bottom: 12vmin; max-height: 50%; }
+#action .actModes .modeBtn { padding: 1vmin 2.2vmin; }
+.updBanner { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--sab) + 2vmin); z-index: 100; background: #263238; color: #fff; font-size: 18px; font-weight: 700; padding: 14px 22px; border-radius: 99px; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+@media (orientation: portrait) { .mixRow .aw { font-size: 4.6vmin; min-width: 0; } }
