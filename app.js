@@ -9,6 +9,7 @@ const D = window.DATA, M = window.AUDIO_MANIFEST || { w: [], p: [], ln: [], ls: 
   D.RACE_NOUNS = C.RACE.NOUNS; D.RACE_VERBS = C.RACE.VERBS; D.RACE_ADJS = C.RACE.ADJS; D.RACE_PLACES = C.RACE.PLACES; D.RACE_LEVELS = C.RACE.LEVELS;
   D.ACTIONS = C.ACTIONS; D.ACT_LEVELS = C.ACT_LEVELS; D.ROOMS = C.ROOMS; D.INTER = C.INTER; D.ACTS = C.ACTS; D.DECOR = C.DECOR; D.DIALOG = C.DIALOG;
   D.SOUND_ALIAS = C.SOUND_ALIAS; Object.assign(D.PHRASES, C.PHRASES);
+  D.WG = C.WG; D.VANISH = C.VANISH; D.PMATCH = C.PMATCH; D.ACT_MIX_AT = C.ACT_MIX_AT; D.AUDIO_WORDS = C.AUDIO_WORDS || [];
 })(window.CONTENT);
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -22,14 +23,15 @@ if (/[?&]simsafe/.test(location.search)) document.documentElement.classList.add(
 
 // ================= state =================
 const KEY = 'wesReading.v1';
-const DEF = { v: 3, stars: 0, points: 0, totalStars: 0, rain: { lv: 6, good: {}, done: 0, unlocked: 6, prog: {}, vi: {} }, story: { read: {}, pages: {}, shelves: 1 },
+const DEF = { v: 5, medals: [0, 0, 0], wg: { got: [], font: '', seen: 0 }, van: { lv: 0, unlocked: 0, prog: {}, step: {}, seen: {}, best: {} }, pm: { lv: 0, unlocked: 0, prog: {}, recent: [] }, stars: 0, points: 0, totalStars: 0, rain: { lv: 6, good: {}, done: 0, unlocked: 6, prog: {}, vi: {} }, story: { read: {}, pages: {}, shelves: 1 },
   race: { lv: 0, good: {}, done: 0, unlocked: 0, prog: {} }, act: { lv: 0, good: 0, done: 0, seen: {}, unlocked: 0, prog: {} }, owned: {}, decor: {}, inter: {}, upper: false, letterSounds: 'auto',
   log: { words: 0, sentences: 0, matches: 0, stories: 0, minutes: 0, firstPlay: 0, lastPlay: 0, misses: 0 }, hard: {} };
 let S;
 function load() {
   try { S = Object.assign(JSON.parse(JSON.stringify(DEF)), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { S = JSON.parse(JSON.stringify(DEF)); }
-  for (const k of ['rain', 'story', 'race', 'act', 'log']) S[k] = Object.assign(JSON.parse(JSON.stringify(DEF[k])), S[k] || {});
-  if (!localStorage.getItem(KEY)) S.v = 3;
+  for (const k of ['rain', 'story', 'race', 'act', 'log', 'van', 'pm']) S[k] = Object.assign(JSON.parse(JSON.stringify(DEF[k])), S[k] || {});
+  if (!localStorage.getItem(KEY)) S.v = 5;
+  if (!S.wg || !S.wg.got) S.wg = { got: [], font: '', seen: 0 }; if (!S.medals) S.medals = [0, 0, 0];
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 load();
@@ -45,7 +47,34 @@ function migrate() {
   S.migratedFrom = S.v || 1; S.v = 3; save();
 }
 migrate();
-['rain', 'race', 'act'].forEach(k => { const n = (k === 'rain' ? D.RAIN_LEVELS : k === 'race' ? D.RACE_LEVELS : D.ACT_LEVELS).length - 1; S[k].lv = Math.max(0, Math.min(n, S[k].lv | 0)); S[k].unlocked = Math.min(n, Math.max(S[k].unlocked | 0, S[k].lv)); });
+// v4: Action Words became a 20-level ladder of clear sub-modes; old levels (a1..a8) map onto it
+(function migrate4() {
+  if ((S.v || 1) >= 4) return;
+  const AM = [0, 3, 6, 9, 11, 13, 16, 17], m = (k) => AM[Math.max(0, Math.min(7, k | 0))];
+  S.act.lv = m(S.act.lv); S.act.unlocked = Math.max(S.act.lv, m(S.act.unlocked));
+  S.migratedFrom4 = S.v; S.v = 4; save();
+})();
+// v5: no more practice-day gates. Every level has 10 bronze stars (open the next level), 10 silver, 10 gold.
+// Old progress becomes bronze stars (a level that was passed, or whose points goal was met = 10 bronze).
+(function migrate5() {
+  if ((S.v || 1) >= 5) return;
+  const MODES = { rain: [D.RAIN_LEVELS, (i) => D.RAIN_LEVELS[i].need], race: [D.RACE_LEVELS, (i) => raceNeed(i).need], act: [D.ACT_LEVELS, (i) => D.ACT_LEVELS[i].need],
+    van: [D.VANISH.LEVELS, (i) => D.VANISH.LEVELS[i].need], pm: [D.PMATCH.LEVELS, (i) => D.PMATCH.LEVELS[i].need] };
+  let bronze = 0;
+  Object.entries(MODES).forEach(([key, [levels, need]]) => {
+    const st = S[key]; if (!st) return; st.prog = st.prog || {};
+    levels.forEach((L, i) => {
+      const p = st.prog[L.id]; let ls = 0;
+      if (p) ls = p.pts >= need(i) ? 10 : Math.min(9, Math.round((p.pts || 0) / need(i) * 10));
+      if (i < (st.unlocked | 0) && (p || key !== 'rain' || i >= 6)) ls = Math.max(ls, 10);
+      if (ls) { const q = progOf(st.prog, L.id); q.ls = Math.max(q.ls || 0, ls); if (q.ls >= 10) bronze++; }
+    });
+    while ((st.unlocked | 0) < levels.length - 1 && ((st.prog[levels[st.unlocked | 0].id] || {}).ls || 0) >= 10) st.unlocked = (st.unlocked | 0) + 1;
+  });
+  S.medals[0] += bronze; for (let k = 0; k < bronze; k++) grantReward();
+  S.migratedFrom5 = S.v; S.v = 5; save();
+})();
+['rain', 'race', 'act', 'van', 'pm'].forEach(k => { const n = ({ rain: D.RAIN_LEVELS, race: D.RACE_LEVELS, act: D.ACT_LEVELS, van: D.VANISH.LEVELS, pm: D.PMATCH.LEVELS })[k].length - 1; S[k].lv = Math.max(0, Math.min(n, S[k].lv | 0)); S[k].unlocked = Math.min(n, Math.max(S[k].unlocked | 0, S[k].lv)); });
 
 // ================= audio =================
 // v2 engine: clips are fetched + decoded once into Web Audio buffers and scheduled back-to-back
@@ -198,6 +227,7 @@ function speakable() {
   D.RACE_NOUNS.forEach(n => { w(n.s); w(n.p); }); D.RACE_VERBS.forEach(v => { w(v.b); w(v.s); }); D.RACE_ADJS.forEach(a => w(a.w)); D.RACE_PLACES.forEach(p => w(p.w));
   ['the', 'The', 'can'].forEach(w);
   D.ACTIONS.forEach(a => w(a.w)); D.ACTION_PHRASES.forEach(p => p.w.split(' ').forEach(w));
+  D.AUDIO_WORDS.forEach(w); D.PMATCH.RIDDLES.forEach(r => w(r.w)); D.WG.SECRET.concat(D.WG.STICKERS).forEach(x => w(x.w));
   D.ROOMS.forEach(r => { w(r.name); r.items.forEach(it => w(it[0])); });
   Object.keys(D.PHRASES).forEach(k => out.push(['p', k]));
   D.LETTERS.forEach(l => out.push(['ln', l])); D.LETTERS.concat(D.DIGRAPHS, ['ai', 'ay', 'ee', 'ea', 'oa', 'igh', 'oo', 'ar', 'or', 'er', 'ir', 'ur', 'ou', 'ow', 'oi', 'oy', 'aw', 'au', 'wh', 'zz']).forEach(g => out.push(['ls', g]));
@@ -340,7 +370,7 @@ document.addEventListener('click', (ev) => {
   if (ev.target.closest('[data-again]')) { SFX.tap(); if (lastPrompt) say(lastPrompt); }
 });
 function go(where) {
-  ({ home, rain: rainMap, story: shelf, race: raceMap, action: actionHome, gallery }[where] || home)();
+  ({ home, rain: rainMap, story: shelf, race: raceMap, action: actMap, vanish: vanMap, match: pmMap, words: () => wordGalleries(), gallery }[where] || home)();
 }
 
 // ================= start & home =================
@@ -381,6 +411,9 @@ function home(fromStart) {
     <button class="tile story" data-mode="story"><span class="big emoji">📖</span><span>Story Time</span></button>
     <button class="tile race" data-mode="race"><span class="big emoji">🏎️</span><span>Word Race</span></button>
     <button class="tile action" data-mode="action"><span class="big emoji">🤸</span><span>Action Words</span></button>
+    <button class="tile vanish" data-mode="vanish"><span class="big emoji">🪄</span><span>Vanishing</span></button>
+    <button class="tile match" data-mode="match"><span class="big emoji">🔍</span><span>Picture Match</span></button>
+    <button class="tile words" data-mode="words"><span class="big emoji">🎖️</span><span>Word Galleries</span>${S.wg.got.length > (S.wg.seen || 0) ? `<span class="badge">${E('✨')} ${S.wg.got.length - (S.wg.seen || 0)}</span>` : ''}</button>
     <button class="tile gallery" data-mode="gallery"><span class="big emoji">🏰</span><span>Star Gallery</span><span class="badge">⭐ ${S.stars}</span></button>
   </div>
   <button class="parentKey" aria-label="Grown-ups: press and hold"><span class="ring"></span>⚙️</button>`, (el) => {
@@ -421,11 +454,12 @@ function parentPanel() {
   <div class="grid">${st(S.stars, 'stars to spend')}${st(S.totalStars, 'stars earned in total')}${st(L.words, 'words spelled')}${st(L.sentences, 'sentences built')}
   ${st(Object.keys(S.story.read).length + ' / ' + D.STORIES.length, 'stories finished')}${st(L.matches, 'action words matched')}${st(owned, 'gallery items')}${st(L.minutes, 'minutes played')}</div>
   <h3>Trickiest words</h3><div class="note">${hard}</div>
-  <h3>Levels</h3>
-  <h3>Levels</h3><div class="note">Choosing a level here also unlocks it and every level before it. Stars: ★ = a third of the level's practice goal; ★★★ = mastered (from level 9 this also needs practice on 2–3 different days).</div>
-  <label>Letter Rain ${sel('pRain', D.RAIN_LEVELS.map((l, i) => `${i + 1}. ${l.name} ${'★'.repeat(rainStars(i))}${i > S.rain.unlocked ? ' 🔒' : ''}`), S.rain.lv)}</label>
-  <label>Word Race ${sel('pRace', D.RACE_LEVELS.map((l, i) => `${i + 1}. ${l.name} — ${l.example} ${'★'.repeat(raceStars(i))}${i > S.race.unlocked ? ' 🔒' : ''}`), S.race.lv)}</label>
-  <label>Action Words ${sel('pAct', D.ACT_LEVELS.map((l, i) => `${i + 1}. ${l.name} ${'★'.repeat(actStars(i))}${i > S.act.unlocked ? ' 🔒' : ''}`), S.act.lv)}</label>
+  <h3>Levels</h3><div class="note">Choosing a level here also unlocks it and every level before it. Each round earns 1–3 stars for that level (3 = mostly first tries). 10 stars = bronze medal and the next level opens right away; 20 = silver, 30 = gold. Every medal unlocks a Word Galleries reward (secret words, stickers, fancy letters). No waiting days.</div>
+  <label>Letter Rain ${sel('pRain', D.RAIN_LEVELS.map((l, i) => `${i + 1}. ${l.name} ${rainStars(i) ? ' ' + rainStars(i) + '/30★' : ''}${i > S.rain.unlocked ? ' 🔒' : ''}`), S.rain.lv)}</label>
+  <label>Word Race ${sel('pRace', D.RACE_LEVELS.map((l, i) => `${i + 1}. ${l.name} — ${l.example} ${raceStars(i) ? ' ' + raceStars(i) + '/30★' : ''}${i > S.race.unlocked ? ' 🔒' : ''}`), S.race.lv)}</label>
+  <label>Action Words ${sel('pAct', D.ACT_LEVELS.map((l, i) => `${i + 1}. ${l.name} ${actStars(i) ? ' ' + actStars(i) + '/30★' : ''}${i > S.act.unlocked ? ' 🔒' : ''}`), S.act.lv)}</label>
+  <label>Vanishing ${sel('pVan', D.VANISH.LEVELS.map((l, i) => `${i + 1}. ${l.name} — ${l.tpl[0]} ${ladStars('van', i) ? ' ' + ladStars('van', i) + '/30★' : ''}${i > S.van.unlocked ? ' 🔒' : ''} (help step ${(S.van.step[l.id] || 0) + 1}/5)`), S.van.lv)}</label>
+  <label>Picture Match ${sel('pPm', D.PMATCH.LEVELS.map((l, i) => `${i + 1}. ${l.name} ${ladStars('pm', i) ? ' ' + ladStars('pm', i) + '/30★' : ''}${i > S.pm.unlocked ? ' 🔒' : ''}`), S.pm.lv)}</label>
   <label><input type="checkbox" id="pUpper" ${S.upper ? 'checked' : ''}> Show CAPITAL letters (lowercase is the default)</label>
   <label>Letter Rain says ${sel('pSnd', ['letter sounds for decodable words, names for others (default)', 'always letter sounds', 'always letter names'], ['auto', 'sounds', 'names'].indexOf(S.letterSounds))}</label>
   <label>Voice player ${sel('pEng', ['Web Audio — smooth, gapless (default)', 'HTML audio — use if the iPad is on silent and you hear nothing'], S.engine === 'html' ? 1 : 0)}</label>
@@ -450,7 +484,8 @@ function parentPanel() {
   $('#pClose', o).onclick = () => {
     S.rain.lv = +$('#pRain', o).value; S.rain.unlocked = Math.max(S.rain.unlocked, S.rain.lv);
     S.race.lv = +$('#pRace', o).value; S.race.unlocked = Math.max(S.race.unlocked, S.race.lv);
-    S.act.lv = +$('#pAct', o).value; S.act.unlocked = Math.max(S.act.unlocked, S.act.lv); S.upper = $('#pUpper', o).checked; S.letterSounds = ['auto', 'sounds', 'names'][+$('#pSnd', o).value]; S.engine = +$('#pEng', o).value ? 'html' : 'webaudio';
+    S.act.lv = +$('#pAct', o).value; S.act.unlocked = Math.max(S.act.unlocked, S.act.lv);
+    S.van.lv = +$('#pVan', o).value; S.van.unlocked = Math.max(S.van.unlocked, S.van.lv); S.pm.lv = +$('#pPm', o).value; S.pm.unlocked = Math.max(S.pm.unlocked, S.pm.lv); S.upper = $('#pUpper', o).checked; S.letterSounds = ['auto', 'sounds', 'names'][+$('#pSnd', o).value]; S.engine = +$('#pEng', o).value ? 'html' : 'webaudio';
     save(); o.remove(); home();
   };
 }
@@ -462,29 +497,68 @@ function nextBtn(el, fn, label) {
   b.addEventListener('click', () => { SFX.whoosh(); b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); fn(); say(['p', 'next']); });
   return b;
 }
+// ================= medals: 10 bronze stars open the next level, then 10 silver, then 10 gold =================
+const TIER = ['bronze', 'silver', 'gold'], MEDAL = ['🥉', '🥈', '🥇'];
+function medalBars(ls, big) { return `<span class="medals ${big ? 'big' : ''}">${[0, 1, 2].map(t => `<i class="m${t}"><b style="width:${Math.max(0, Math.min(10, ls - t * 10)) * 10}%"></b></i>`).join('')}</span>`; }
+function tierText(ls) { if (ls >= 30) return `${MEDAL[2]} ${MEDAL[1]} ${MEDAL[0]}`; const t = Math.floor(ls / 10); return `${ls - t * 10} of 10 ${MEDAL[t]}`; }
+function grantReward() { const T = D.WG.TRACK, k = S.wg.got.length; if (k >= T.length) return null; const r = T[k]; S.wg.got.push(r[0] + ':' + r[1]); return r; }
+function rewardInfo(r) { const [type, id] = r; const list = type === 'font' ? D.WG.FONTS : type === 'sticker' ? D.WG.STICKERS : D.WG.SECRET; const x = list.find(v => (v.w || v.id) === id); return Object.assign({ type }, x); }
+// one round finished: 1-3 stars toward this level's medals (3 = mostly first tries); no gates, no losing
+function medalAward(key, levels, i, rate) {
+  const L = levels[i], p = progOf(S[key].prog, L.id), before = p.ls || 0;
+  const gain = rate >= .8 ? 3 : rate >= .5 ? 2 : 1;
+  p.ls = Math.min(30, before + gain); p.rounds = (p.rounds || 0) + 1;
+  const crossed = [10, 20, 30].filter(t => before < t && p.ls >= t).map(t => t / 10 - 1);
+  let levelUp = false;
+  if (p.ls >= 10 && S[key].unlocked <= i && i < levels.length - 1) { S[key].unlocked = i + 1; levelUp = true; }
+  const rewards = [];
+  crossed.forEach(t => { S.medals[t]++; for (let k = 0; k < (t === 2 ? 2 : 1); k++) { const r = grantReward(); if (r) rewards.push(r); } });
+  save();
+  return { before, after: p.ls, gain, crossed, levelUp, rewards,
+    nextLevel: (play) => i + 1 < levels.length && i + 1 <= S[key].unlocked ? () => { S[key].lv = i + 1; save(); play(); } : null };
+}
 function roundDone(again, extra) {
-  extra = extra || {};
+  extra = extra || {}; const m = extra.medal;
   SFX.tada();
-  const hasNext = !!extra.nextLevel, hasStars = extra.stars != null;
-  const starsRow = hasStars ? `<div class="lvStars">${[0, 1, 2].map(k => `<span class="emoji ${k < extra.stars ? 'on' : ''} ${k >= (extra.starsBefore || 0) && k < extra.stars ? 'new' : ''}">⭐</span>`).join('')}</div>
-    <div class="lvBar"><i style="width:${Math.round((extra.pct || 0) * 100)}%"></i></div>${extra.waitDays ? `<div class="lvNote">${E('🌙')} ${E('➡️')} ${E('☀️')}</div>` : ''}` : '';
-  const o = overlay(`<div class="huge emoji">${extra.levelUp ? '🏆' : '🌟'}</div><h2>${extra.levelUp ? 'New level!' : 'You did it!'}</h2>${starsRow}
-  <div class="row"><button class="navBtn go" data-a="more" aria-label="Play more">${E('🔁')}</button>${hasNext ? `<button class="navBtn next" data-a="next" aria-label="Next level">${E('⏭️')}</button>` : ''}<button class="navBtn" data-a="home" aria-label="Home">${E('🏠')}</button></div>`);
+  const hasNext = !!extra.nextLevel, top = m && m.crossed.length ? m.crossed[m.crossed.length - 1] : -1;
+  const mid = m ? `<div class="lvStars">${Array.from({ length: m.gain }, () => '<span class="emoji new">⭐</span>').join('')}</div>${medalBars(m.before, true)}<div class="tierTxt">${tierText(m.before)}</div><div class="medalFx"></div>` : '';
+  const o = overlay(`<div class="huge emoji">${top >= 0 ? MEDAL[top] : extra.levelUp ? '🏆' : '🌟'}</div><h2>${top >= 0 ? TIER[top][0].toUpperCase() + TIER[top].slice(1) + ' medal!' : 'You did it!'}</h2>${mid}
+  <div class="row"><button class="navBtn go" data-a="more" aria-label="Play more">${E('🔁')}</button>${hasNext ? `<button class="navBtn next" data-a="next" aria-label="Next level">${E('⏭️')}</button>` : ''}<button class="navBtn" data-a="home" aria-label="Home">${E('🏠')}</button></div>`, 'doneCard');
   burst($('.huge', o));
-  const items = extra.levelUp ? [line('levelup') || ['p', 'new_level']] : [praise(), line('round') || ['p', 'round_done']];
-  if (!extra.levelUp && hasStars && extra.stars > (extra.starsBefore || 0)) items.push(['p', 'stars_level']);
-  if (extra.waitDays) items.push(['p', 'more_days']);
-  else if (!extra.levelUp && hasStars && extra.stars < 3) { const p = extra.pct || 0; items.push(['p', 'progress_' + (p >= .8 ? 6 : p >= .4 && p < .6 ? 5 : pick([0, 1, 4, 7]))]); }
+  const items = [praise(), line('round') || ['p', 'round_done']];
+  if (m) {
+    if (m.crossed.length) {
+      m.crossed.forEach(t => items.push(line('medal_' + TIER[t])));
+      m.rewards.forEach(r => { items.push(line('reward_' + r[0])); if (r[0] !== 'font') items.push(['w', r[1]]); });
+    } else if (m.after >= 30) items.push(['p', 'all_gold']);
+    else { const t = Math.floor(m.after / 10), rem = 10 - (m.after - t * 10); items.push(['p', `more_${'bsg'[t]}_${rem}`]); }
+  }
+  if (extra.sayAfter) items.push(extra.sayAfter);
   lastPrompt = items; say(items);
-  $$('.lvStars .new', o).forEach((s, k) => setTimeout(() => { s.classList.add('pop'); SFX.star(); }, 500 + k * 400));
+  $$('.lvStars .new', o).forEach((s, k) => setTimeout(() => { s.classList.add('pop'); SFX.star(); }, 400 + k * 300));
+  if (m) setTimeout(() => {
+    $$('.medals.big b', o).forEach((b, t) => { b.style.width = Math.max(0, Math.min(10, m.after - t * 10)) * 10 + '%'; });
+    const tt = $('.tierTxt', o); if (tt) tt.textContent = tierText(m.after);
+  }, 400 + m.gain * 300);
+  if (top >= 0) setTimeout(() => medalShow(o, m), 900 + m.gain * 300);
   o.addEventListener('click', (e) => {
     const b = e.target.closest('[data-a]'); if (!b) return; SFX.tap(); o.remove();
     if (b.dataset.a === 'more') again(); else if (b.dataset.a === 'next') { extra.nextLevel(); say(['p', 'next_level']); } else home();
   });
 }
+// the medal spins in with a boom, confetti flies, and each reward pops out and does its action
+function medalShow(o, m) {
+  const fx = $('.medalFx', o); if (!fx || !o.isConnected) return;
+  const t = m.crossed[m.crossed.length - 1];
+  fx.innerHTML = `<span class="medalBig emoji">${MEDAL[t]}</span>` + m.rewards.map(r => { const x = rewardInfo(r); return `<span class="rewardChip ${x.type}"><span class="emoji">${x.e}</span><b>${esc(x.w || x.name)}</b></span>`; }).join('');
+  const mb = $('.medalBig', fx);
+  if (mb.animate) mb.animate([{ transform: 'scale(0) rotate(-540deg)' }, { transform: 'scale(1.6) rotate(20deg)', offset: .6 }, { transform: 'scale(1) rotate(0)' }], { duration: 1000, easing: 'ease-out' });
+  SFX.boom(); setTimeout(() => { burst(mb, ['🎉', '🎊', '⭐', MEDAL[t]]); burst(mb, ['✨', '🌟', '💥']); cheerPal(); }, 600);
+  $$('.rewardChip', fx).forEach((c, k) => { c.style.opacity = 0; setTimeout(() => { c.style.opacity = 1; payoff(c, { cheer: false, kind: 'zing' }); const r = rewardInfo(m.rewards[k]); anim(c.firstElementChild, r.a || 'jump'); }, 1400 + k * 700); });
+}
 function levelMap(id, title, levels, cur, unlocked, onPick, bg) {
   show(id, topBar(title) + `<div class="levelMap">${levels.map((l, i) => `<button class="lvBtn ${i > unlocked ? 'locked' : ''} ${i === cur ? 'cur' : ''}" data-i="${i}" style="background:${l.color || bg}">
-    <span class="num">${i + 1}</span><span class="big emoji">${i > unlocked ? '🔒' : l.icon}</span><span class="nm">${esc(l.name)}</span>${i <= unlocked && l.stars != null ? `<span class="stars">${[0, 1, 2].map(k => `<i class="${k < l.stars ? 'on' : ''}">★</i>`).join('')}</span>` : ''}</button>`).join('')}</div>`, (el) => {
+    <span class="num">${i + 1}</span><span class="big emoji">${i > unlocked ? '🔒' : l.icon}</span><span class="nm">${esc(l.name)}</span>${i <= unlocked && l.stars != null ? medalBars(l.stars) : ''}</button>`).join('')}</div>`, (el) => {
     $$('.lvBtn', el).forEach(b => b.addEventListener('click', () => {
       const i = +b.dataset.i; if (i > unlocked) { SFX.boing(); anim(b, 'shake'); say(['p', 'level_locked']); return; }
       SFX.pop(); onPick(i);
@@ -499,8 +573,8 @@ function levelMap(id, title, levels, cur, unlocked, onPick, bg) {
 // purpose: points per clean answer, a per-level goal, and (from level 9) practice on 2-3 different days.
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
 function progOf(bucket, id) { const p = bucket[id] || (bucket[id] = { pts: 0, rounds: 0, days: [] }); return p; }
-function levelStars(p, need, days) { if (!p) return 0; if (p.pts >= need && p.days.length >= days) return 3; if (p.pts >= need * 2 / 3) return 2; if (p.pts >= need / 3) return 1; return 0; }
-function rainStars(i) { const l = D.RAIN_LEVELS[i]; return levelStars(S.rain.prog[l.id], l.need, l.days); }
+function levelStars(p) { return p ? Math.min(30, p.ls || 0) : 0; }   // v5: medal stars 0-30 (10 bronze, 10 silver, 10 gold)
+function rainStars(i) { return levelStars(S.rain.prog[D.RAIN_LEVELS[i].id]); }
 function rainMap() {
   levelMap('rainMap', 'Letter Rain', D.RAIN_LEVELS.map((l, i) => Object.assign({}, l, { stars: rainStars(i) })), S.rain.lv, S.rain.unlocked, (i) => { S.rain.lv = i; save(); rainPlay(); });
   prompt([['p', 'm_rain'], ['p', 'pick_level']]);
@@ -542,9 +616,9 @@ function rainPlay() {
   }
   let wi = 0, it, cur, gs, need = [], ni = 0, misses = 0, tiles = [], raf = 0, last = 0, spawnT = 0, idleT = 0, alive = true, busy = false;
   let spawnN = 0, needAt = 0, earned = 0;
-  const el = show('rain', topBar(`${E(lv.icon)} ${esc(lv.name)}`, { back: 'rain', backIcon: '⬅️' }) + `<div class="rainHead"><div class="rainPic emoji"></div><div class="slots"></div><div class="rainProg"><span class="emoji">${'⭐'.repeat(rainStars(lvIdx)) || '☆'}</span><span class="bar"><i></i></span></div></div><div class="field"></div>`);
-  const field = $('.field', el), slotsEl = $('.slots', el), picEl = $('.rainPic', el), progBar = $('.rainProg i', el);
-  const showProg = () => { progBar.style.width = Math.min(100, prog.pts / lv.need * 100) + '%'; };
+  const el = show('rain', topBar(`${E(lv.icon)} ${esc(lv.name)}`, { back: 'rain', backIcon: '⬅️' }) + `<div class="rainHead"><div class="rainPic emoji"></div><div class="slots"></div><div class="rainProg">${medalBars(rainStars(lvIdx))}</div></div><div class="field"></div>`);
+  const field = $('.field', el), slotsEl = $('.slots', el), picEl = $('.rainPic', el), progBar = null;
+  const showProg = () => {};
   showProg();
   warm(lv.words.filter(() => lv.mode !== 'letter').map(w => ['w', w.word]).concat(lv.mode === 'letter' ? lv.words.flatMap(w => [['ls', w.word], ['ln', w.word]]) : []));
   cleanup = () => { alive = false; cancelAnimationFrame(raf); };
@@ -698,17 +772,9 @@ function rainPlay() {
   }
   function finish() {
     alive = false; cancelAnimationFrame(raf);
-    const before = rainStars(lvIdx);
-    prog.rounds++; if (!prog.days.includes(today())) prog.days.push(today());
-    if (prog.days.length > 5) prog.days = prog.days.slice(-5);
-    const after = rainStars(lvIdx);
-    let levelUp = false;
-    if (after === 3 && S.rain.unlocked <= lvIdx && lvIdx < D.RAIN_LEVELS.length - 1) { S.rain.unlocked = lvIdx + 1; levelUp = true; }
-    save(); addPoints(3, $('.rainHead'));
-    const waitDays = prog.pts >= lv.need && prog.days.length < lv.days;
-    const nl = lvIdx + 1;
-    roundDone(rainPlay, { levelUp, starsBefore: before, stars: after, waitDays, pct: Math.min(1, prog.pts / lv.need),
-      nextLevel: nl < D.RAIN_LEVELS.length && nl <= S.rain.unlocked ? () => { S.rain.lv = nl; save(); rainPlay(); } : null });
+    const m = medalAward('rain', D.RAIN_LEVELS, lvIdx, earned / Math.max(1, wi || N));
+    addPoints(3, $('.rainHead'));
+    roundDone(rainPlay, { medal: m, levelUp: m.levelUp, nextLevel: m.nextLevel(rainPlay) });
   }
   function loop(ts0) {
     if (!alive) return;
@@ -834,7 +900,7 @@ function buildScene(host, c) {
 
 // ================= WORD RACE =================
 function raceNeed(i) { return { need: 6 + i * 2, days: i >= 8 ? 3 : i >= 4 ? 2 : 1 }; }
-function raceStars(i) { const L = D.RACE_LEVELS[i], r = raceNeed(i); return levelStars(S.race.prog[L.id], r.need, r.days); }
+function raceStars(i) { return levelStars(S.race.prog[D.RACE_LEVELS[i].id]); }
 function raceMap() {
   levelMap('raceMap', 'Word Race', D.RACE_LEVELS.map((l, i) => Object.assign({}, l, { stars: raceStars(i) })), S.race.lv, S.race.unlocked, (i) => { S.race.lv = i; save(); racePlay(); });
   prompt([['p', 'm_race'], ['p', 'pick_level']]);
@@ -940,15 +1006,8 @@ function racePlay() {
     if (!still()) return;
     round++;
     if (round >= 4) {
-      const before = raceStars(lvIdx);
-      prog.rounds++; if (!prog.days.includes(today())) prog.days.push(today()); if (prog.days.length > 5) prog.days = prog.days.slice(-5);
-      const after = raceStars(lvIdx);
-      let levelUp = false;
-      if (after === 3 && lvIdx < D.RACE_LEVELS.length - 1 && S.race.unlocked <= lvIdx) { S.race.unlocked = lvIdx + 1; levelUp = true; }
-      save();
-      const nl = lvIdx + 1;
-      roundDone(racePlay, { levelUp, starsBefore: before, stars: after, pct: Math.min(1, prog.pts / RN.need), waitDays: prog.pts >= RN.need && prog.days.length < RN.days,
-        nextLevel: nl < D.RACE_LEVELS.length && nl <= S.race.unlocked ? () => { S.race.lv = nl; save(); racePlay(); } : null });
+      const m = medalAward('race', D.RACE_LEVELS, lvIdx, 1);
+      roundDone(racePlay, { medal: m, levelUp: m.levelUp, nextLevel: m.nextLevel(racePlay) });
     } else newSentence();
   }
   nextBtn(el, () => { if (!alive) return; hush(); round = Math.min(round, 3); newSentence(); }, 'Next sentence');
@@ -956,158 +1015,545 @@ function racePlay() {
   window.__race = { place: () => { const c = garage.firstChild; if (c) place(c); }, si: () => si, refresh: () => refresh.click(), L };
 }
 
-// ================= ACTION WORDS =================
-const ACT_OF = {}; D.ACTIONS.forEach(a => { ACT_OF[a.w] = a.a; });
-function actNeed(i) { return { need: 10 + i * 3, days: i >= 5 ? 3 : i >= 2 ? 2 : 1 }; }
-function actStars(i) { const L = D.ACT_LEVELS[i], r = actNeed(i); return levelStars(S.act.prog[L.id], r.need, r.days); }
-function actPool() { return D.ACTIONS.slice(0, D.ACT_LEVELS[S.act.lv].n); }
-// phrases are generated from the level's templates, so there are thousands of combos
-function makePhrase() {
-  const L = D.ACT_LEVELS[S.act.lv], pool = actPool().filter(a => a.w !== 'big' && a.w !== 'small'), used = new Set();
-  const nw = () => { let a, k = 0; do { a = pick(pool); } while ((used.has(a.a) || used.has(a.w)) && k++ < 40); used.add(a.a); used.add(a.w); return a.w; };
-  return pick(L.tpl).replace(/W/g, nw);
+// ================= v4 shared: level ladders + action payoffs =================
+// one helper for the Vanishing / Picture Match / Action Words ladders: stars from points + practice days
+function ladStars(key, i) {
+  return levelStars(S[key].prog[LADDER[key]()[i].id]);
 }
-// a correct answer / finished phrase adds mastery; round end checks stars & unlocks
-function actCredit(n) { const p = progOf(S.act.prog, D.ACT_LEVELS[S.act.lv].id); p.pts = Math.round((p.pts + n) * 10) / 10; save(); }
-function actRoundDone(again) {
-  const i = S.act.lv, L = D.ACT_LEVELS[i], p = progOf(S.act.prog, L.id), r = actNeed(i);
-  const before = actStars(i); p.rounds++; if (!p.days.includes(today())) p.days.push(today()); if (p.days.length > 5) p.days = p.days.slice(-5);
-  const after = actStars(i); let levelUp = false;
-  if (after === 3 && i < D.ACT_LEVELS.length - 1 && S.act.unlocked <= i) { S.act.unlocked = i + 1; levelUp = true; }
-  save();
-  roundDone(again, { levelUp, starsBefore: before, stars: after, pct: Math.min(1, p.pts / r.need), waitDays: p.pts >= r.need && p.days.length < r.days,
-    nextLevel: i + 1 < D.ACT_LEVELS.length && i + 1 <= S.act.unlocked ? () => { S.act.lv = i + 1; save(); again(); } : null });
+const LADDER = { van: () => D.VANISH.LEVELS, pm: () => D.PMATCH.LEVELS, act: () => D.ACT_LEVELS };
+let RR = { n: 0, ok: 0 };   // this round's answers (for 1-3 medal stars)
+function ladCredit(key, n, clean) { const L = LADDER[key]()[S[key].lv], p = progOf(S[key].prog, L.id); p.pts = Math.round((p.pts + n) * 10) / 10; RR.n++; if (clean) RR.ok++; save(); }
+function ladEnd(key, again, extra) {
+  extra = extra || {};
+  const i = S[key].lv, levels = LADDER[key]();
+  if (extra.pre) extra.pre();
+  const m = medalAward(key, levels, i, RR.n ? RR.ok / RR.n : 1); RR = { n: 0, ok: 0 };
+  roundDone(again, Object.assign({}, extra, { medal: m, levelUp: m.levelUp, nextLevel: m.nextLevel(again) }));
 }
-function actMap(mode) {
-  levelMap('actMap', 'Action Words', D.ACT_LEVELS.map((l, i) => Object.assign({}, l, { stars: actStars(i) })), S.act.lv, S.act.unlocked, (i) => { S.act.lv = i; save(); actionHome(mode); });
-  prompt([['p', 'm_action'], ['p', 'pick_level']]);
+function ladMap(key, id, title, play, extraHtml) {
+  levelMap(id, title, LADDER[key]().map((l, i) => Object.assign({}, l, { stars: ladStars(key, i) })), S[key].lv, S[key].unlocked, (i) => { S[key].lv = i; save(); play(); });
+  if (extraHtml) { const el = $('#' + id); el.insertAdjacentHTML('beforeend', extraHtml); }
 }
-function actionHome(mode) {
-  mode = mode || 'explore';
-  const L = D.ACT_LEVELS[S.act.lv];
-  const el = show('action', topBar('Action Words') + `<div class="actModes">
-    <button class="modeBtn lvChip" data-lv style="background:${L.color}">${E(L.icon)}<span>${'⭐'.repeat(actStars(S.act.lv)) || esc(L.name)}</span></button>
-    <button class="modeBtn ${mode === 'explore' ? 'on' : ''}" data-m="explore">${E('🎈')}<span>Play</span></button>
-    <button class="modeBtn ${mode === 'match' ? 'on' : ''}" data-m="match">${E('🎯')}<span>Match</span></button>
-    <button class="modeBtn ${mode === 'phrase' ? 'on' : ''}" data-m="phrase">${E('📜')}<span>Read & Do</span></button>
-    <button class="modeBtn ${mode === 'mix' ? 'on' : ''}" data-m="mix">${E('🔀')}<span>Mix</span></button></div>
-    <div class="actStage"><div class="buddy"><span class="emoji">🐉</span></div></div><div class="actWords"></div>`);
-  $$('[data-m]', el).forEach(b => b.addEventListener('click', () => { SFX.pop(); actionHome(b.dataset.m); }));
-  $('[data-lv]', el).addEventListener('click', () => { SFX.pop(); actMap(mode); });
-  const stage = $('.actStage', el), buddy = $('.buddy', el), words = $('.actWords', el);
-  let alive = true; cleanup = () => { alive = false; clearInterval(stage._iv); };
-  buddy.addEventListener('click', () => { SFX.boing(); anim(buddy, 'jump', stage); say(['p', 'sparky_' + rnd(12)]); });
-  if (mode === 'explore') {
-    const all = actPool();
-    const deal = () => {
-      const list = shuffle(all).slice(0, 8);
-      words.innerHTML = list.map(a => `<button class="aw lt" data-w="${a.w}" data-a="${a.a}"><span>${a.w}</span></button>`).join('');
-      preload(list.map(a => ['w', a.w]));
-      $$('.aw', words).forEach(b => b.addEventListener('click', () => {
-        SFX.pop(); say(['w', b.dataset.w]); anim(b, b.dataset.a, words); setTimeout(() => anim(buddy, b.dataset.a, stage), 250);
-        if (!S.act.seen[b.dataset.w]) { S.act.seen[b.dataset.w] = 1; save(); addPoints(1, b); }
-      }));
-    };
-    deal();
-    nextBtn(el, deal, 'New words');
-    prompt([['p', 'm_action'], ['p', 'action_intro']]);
-  } else if (mode === 'match') {
-    let n = 0, firstTry = true, target, qid = 0;
-    const nChoices = [2, 3, 3, 4, 4, 4, 5, 5][S.act.lv] || 4;
-    const next = () => {
-      if (!alive) return;
-      clearInterval(stage._iv);
-      if (n >= 6) return actRoundDone(() => actionHome('match'));
-      n++; firstTry = true; const my = ++qid;
-      const pool = actPool();
-      target = pick(pool); const opts = shuffle([target].concat(shuffle(pool.filter(a => a.w !== target.w && a.a !== target.a)).slice(0, nChoices - 1)));
-      words.innerHTML = opts.map(a => `<button class="aw big3 lt" data-w="${a.w}" data-a="${a.a}"><span>${a.w}</span></button>`).join('');
-      preload(opts.map(a => ['w', a.w]));
-      anim(buddy, target.a, stage); stage._iv = setInterval(() => alive && target && anim(buddy, target.a, stage), 3400);
-      prompt([['p', 'action_match']]);
-      $$('.aw', words).forEach(b => b.addEventListener('click', async () => {
-        if (!target || my !== qid) return;
-        if (b.dataset.w === target.w || (b.dataset.a === target.a && b.dataset.w !== target.w)) {
-          clearInterval(stage._iv); SFX.chime(); b.classList.add('right'); anim(b, b.dataset.a, words); burst(b);
-          S.log.matches++; S.act.done++; actCredit(firstTry ? 1 : .4); addPoints(firstTry ? 3 : 1, b);
-          const tg = b.dataset.w; target = null; await say([['w', tg], praise()]); if (alive && my === qid) setTimeout(() => { if (my === qid) next(); }, 400);
-        } else {
-          SFX.boing(); firstTry = false; b.classList.add('wrongish'); anim(b, b.dataset.a, words);
-          say([['p', 'that_says'], ['w', b.dataset.w], oops()]);
-        }
-      }));
-    };
-    nextBtn(el, () => { target = null; next(); }, 'Next one');
-    next();
-  } else if (mode === 'phrase') {
-    let n = 0, pid = 0, lastPh = null;
-    const next = () => {
-      if (!alive) return;
-      if (n >= 5) return actRoundDone(() => actionHome('phrase'));
-      n++; const my = ++pid;
-      let ph, k = 0; do { ph = makePhrase(); } while (ph === lastPh && k++ < 5); lastPh = ph;
-      const raw = ph.split(' '), ws = raw.map(w => w.replace(/[^a-z]/gi, '').toLowerCase());
-      words.innerHTML = `<div class="phrase">${raw.map((w, i) => `<button class="aw big3 lt" data-w="${ws[i]}"><span>${esc(w)}</span></button>`).join('')}<button class="goBtn" aria-label="Go">${E('▶️')}</button></div>`;
-      words.classList.toggle('longPh', raw.length > 4);
-      preload(ws.map(w => ['w', w]));
-      const bs = $$('.aw', words), hl = (i) => bs.forEach((b, j) => b.classList.toggle('hl', j === i));
-      bs.forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.dataset.w]); anim(b, 'jump2', words); }));
-      let did = false, running = false;
-      $('.goBtn', words).addEventListener('click', async () => {
-        if (running) return; running = true; SFX.whoosh();
-        const still = () => alive && my === pid;
-        // 1) read the whole phrase (gapless), lighting each word
-        await say(ws.map((w, i) => ({ k: 'w', id: w, on: () => hl(i) })), { gap: 80 });
-        if (!still()) return;
-        // 2) then do each action word fully, one after the other: light it, say it, act it
-        for (let i = 0; i < ws.length; i++) {
-          const a = ACT_OF[ws[i]]; if (!a) continue;
-          if (!still()) return;
-          hl(i); say(['w', ws[i]]);
-          await anim(buddy, a, stage);
-          await wait(300);
-        }
-        hl(-1); running = false;
-        if (!still()) return;
-        if (!did) { did = true; addPoints(2, buddy); actCredit(1); S.log.matches++; save(); await say([praise()]); if (still()) setTimeout(() => { if (my === pid) next(); }, 400); }
-      });
-      prompt([['p', 'action_phrase']]);
-    };
-    nextBtn(el, next, 'Next phrase');
-    next();
-  } else {
-    // ---- Mix: build a silly combo, refresh any word type, or shuffle them all ----
-    const pickNoun = () => pick(D.RACE_NOUNS), pickAdj = () => pick(D.RACE_ADJS), pickVerb = () => pick(D.RACE_VERBS), pickPlace = () => pick(D.RACE_PLACES);
-    const c = { adj: pickAdj(), noun: pickNoun(), verb: pickVerb(), place: pickPlace() };
-    const TYPES = [['adj', '🎨', pickAdj, x => x.w], ['noun', '🐾', pickNoun, x => x.s], ['verb', '🏃', pickVerb, x => x.s], ['place', '📍', pickPlace, x => x.w]];
-    stage.innerHTML = '';
-    let playing = 0;
-    const words4 = () => ['the', c.adj.w, c.noun.s, c.verb.s, c.place.w];
-    const text = () => 'The ' + c.adj.w + ' ' + c.noun.s + ' ' + c.verb.s + ' ' + c.place.w + '.';
-    function draw() {
-      stage.innerHTML = '';
-      const sc = buildScene(stage, { noun: c.noun, adj: c.adj, verb: c.verb, place: c.place, text: text() }); sc.classList.add('inStage');
-      words.innerHTML = `<div class="mixRow">${TYPES.map(([k, icon, , txt]) => `<div class="mixCol"><button class="aw lt" data-k="${k}"><span>${esc(txt(c[k]))}</span></button><button class="refreshBtn small" data-r="${k}" aria-label="New ${k}">${E('🔄')}</button></div>`).join('')}
-        <div class="mixCol"><button class="goBtn" aria-label="Go">${E('▶️')}</button><button class="refreshBtn small all" data-all aria-label="Shuffle all">${E('🔀')}</button></div></div>`;
-      preload(words4().map(w => ['w', w]));
-      $$('[data-k]', words).forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.textContent]); anim(b, 'jump2', words); }));
-      $$('[data-r]', words).forEach(b => b.addEventListener('click', () => { SFX.whoosh(); const t = TYPES.find(x => x[0] === b.dataset.r); let v; do { v = t[2](); } while (v === c[t[0]]); c[t[0]] = v; draw(); say(['w', t[3](v)]); }));
-      $('[data-all]', words).addEventListener('click', shuffleAll);
-      $('.goBtn', words).addEventListener('click', () => go(sc));
-      return sc;
-    }
-    async function go(sc) {
-      const my = ++playing; SFX.whoosh();
-      const acting = sc.act();
-      await say(words4().map((w, i) => ({ k: 'w', id: w, on: () => sc.hl(i) })), { gap: 70 });
-      await acting; if (my !== playing || !alive) return;
-      sc.hl(-1); addPoints(2, sc); say([praise()]);
-    }
-    function shuffleAll() { SFX.whoosh(); c.adj = pickAdj(); c.noun = pickNoun(); c.verb = pickVerb(); c.place = pickPlace(); const sc = draw(); say(['p', 'shuffle']); setTimeout(() => go(sc), 700); }
-    draw();
-    nextBtn(el, shuffleAll, 'Shuffle all');
-    prompt([['p', 'action_mix']]);
+// extra synth sound effects for the action payoffs
+let NOISE = null;
+function noise(t0, dur, vol, f) {
+  const c = audioCtx(); if (!c) return;
+  if (!NOISE) { NOISE = c.createBuffer(1, c.sampleRate, c.sampleRate); const d = NOISE.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const s = c.createBufferSource(), g = c.createGain(), bq = c.createBiquadFilter(); s.buffer = NOISE; bq.type = 'lowpass'; bq.frequency.value = f || 1200;
+  const t = c.currentTime + (t0 || 0); g.gain.setValueAtTime(vol || .25, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(bq); bq.connect(g); g.connect(c.destination); s.start(t); s.stop(t + dur + .05);
+}
+SFX.zing = () => { tone(400, 0, .25, 'triangle', .14, 1600); tone(800, .1, .25, 'sine', .1, 2400); };
+SFX.crash = () => { noise(0, .45, .3, 900); tone(120, 0, .3, 'square', .08, 50); };
+SFX.boom = () => { noise(0, .7, .35, 500); tone(90, 0, .5, 'sine', .25, 40); [784, 988, 1319].forEach((f, i) => tone(f, .25 + i * .07, .25, 'triangle', .1)); };
+SFX.poof = () => { noise(0, .35, .18, 3000); tone(1200, 0, .3, 'sine', .08, 300); };
+SFX.magic = () => { [1047, 1319, 1568, 2093, 1568, 2093].forEach((f, i) => tone(f, i * .06, .2, 'sine', .08)); };
+// a big, quick celebration on any element: star explosion, shake-pop, and Sparky pops up to cheer
+function payoff(el, opt) {
+  opt = opt || {};
+  if (!el) return;
+  const k = opt.kind || pick(['boom', 'zing', 'crash']);
+  SFX[k](); burst(el, opt.chars || ['⭐', '🌟', '✨', '💥']); setTimeout(() => burst(el, ['⭐', '🎉', '✨']), 180);
+  if (el.animate) el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25) rotate(-4deg)' }, { transform: 'scale(.95) rotate(3deg)' }, { transform: 'scale(1)' }], { duration: 520, easing: 'ease-out' });
+  if (opt.cheer !== false) cheerPal();
+}
+function cheerPal() {
+  const fx = $('#fx'); const s = document.createElement('div'); s.className = 'cheerPal';
+  s.innerHTML = `<span class="emoji">${pick(['🐉', '🐉', '🦖', '🤖', '🦄'])}</span><span class="emoji pom">${pick(['🎉', '🙌', '⭐', '💥'])}</span>`;
+  s.style.left = (8 + rnd(70)) + '%'; fx.appendChild(s);
+  const a = s.animate ? s.animate([{ transform: 'translateY(110%)' }, { transform: 'translateY(-8%)', offset: .25 }, { transform: 'translateY(0) rotate(-8deg)', offset: .4 }, { transform: 'translateY(-14%) rotate(8deg)', offset: .55 }, { transform: 'translateY(0)', offset: .75 }, { transform: 'translateY(110%)' }], { duration: 1500, easing: 'ease-in-out' }) : null;
+  setTimeout(() => s.remove(), 1550);
+}
+// keep an emoji moving forever (cards show an action, idle characters bob)
+function loopAnim(el, a, delay) {
+  if (!el || !ANIM[a] || !el.animate) return;
+  const inner = el.firstElementChild && el.firstElementChild.tagName === 'SPAN' ? el.firstElementChild : el; inner.style.display = 'inline-block';
+  const [k, d] = ANIM[a]; return inner.animate(k, { duration: d, iterations: Infinity, delay: delay || 0, easing: 'ease-in-out' });
+}
+const ACT_TAG = { sleep: '💤', sing: '🎵', swim: '🌊', fly: '☁️', hide: '🌳', dance: '🎶', wave: '👋', zoom: '💨', fall: '💥', roll: '⚽' };
+const capFirst = (s) => s ? s[0].toUpperCase() + s.slice(1) : s;
+const bare = (t) => t.replace(/[^a-z']/gi, '').toLowerCase();
+
+// ================= VANISHING =================
+// A phrase with word spaces. He picks the right word tile for each space. Supports for the target word
+// fade out step by step (🔊 its sound, 🖼️ its picture, 🔤 its letters: full → first letter → none). A
+// clean round takes one more support away (with a magic "poof"); a miss brings one back for that word.
+const VSTEP = [{ au: 1, pic: 1, let: 2 }, { au: 0, pic: 1, let: 2 }, { au: 0, pic: 0, let: 2 }, { au: 0, pic: 0, let: 1 }, { au: 0, pic: 0, let: 0 }];
+const VWEIGHT = [.4, .6, .8, 1, 1.2];
+function vanMap() {
+  ladMap('van', 'vanMap', 'Vanishing', vanPlay);
+  prompt([line('van_intro') || ['p', 'pick_level']]);
+}
+function vanPhrase(L, last) {
+  const bank = D.VANISH.BANK.filter(b => L.bands.includes(b.b)), used = new Set();
+  const take = (c) => { const pool = bank.filter(b => b.c === c && !used.has(b.w)); const w = pick(pool.length ? pool : bank.filter(b => b.c === c)); used.add(w.w); return w; };
+  let tpl, k = 0; do { tpl = pick(L.tpl); } while (tpl === last && L.tpl.length > 1 && k++ < 4);
+  const toks = tpl.split(' ').map(t => { const core = t.replace(/[,!]/g, ''), p = t.slice(core.length);
+    return 'NVA'.includes(core) ? { slot: true, b: take(core), p } : { t: core, p }; });
+  const maxB = Math.max.apply(null, L.bands), all = D.VANISH.BANK.filter(b => b.b <= maxB);
+  toks.filter(t => t.slot).forEach(t => {
+    const w = t.b.w, sim = (x) => (x.w[0] === w[0] ? 3 : 0) + (x.w.length === w.length ? 2 : 0) + (x.w.slice(-1) === w.slice(-1) ? 2 : 0) + [...new Set(x.w)].filter(ch => w.includes(ch)).length + Math.random() * 2;
+    const cand = all.filter(x => x.c !== t.b.c && x.w !== w).sort((a, b) => sim(b) - sim(a)).slice(0, 6);
+    t.opts = shuffle([t.b].concat(shuffle(cand).slice(0, L.ch - 1)));
+  });
+  return { tpl, toks };
+}
+function vanPlay() {
+  RR = { n: 0, ok: 0 };
+  const lvIdx = S.van.lv, L = D.VANISH.LEVELS[lvIdx];
+  const step = S.van.step[L.id] || 0, seenStep = S.van.seen[L.id] == null ? 0 : S.van.seen[L.id];
+  const N = 3; let n = 0, alive = true, pid = 0, lastTpl = null, firstTries = 0, slotsTotal = 0;
+  const el = show('vanish', topBar(`${E(L.icon)} ${esc(L.name)}`, { back: 'vanish', backIcon: '⬅️' }) + `<div class="vanTop"><div class="supports"></div><div class="vanProg"><i></i></div></div>
+    <div class="vanStage"><div class="vanPhrase lt"></div><div class="vanPal"><span class="emoji">🐉</span></div></div><div class="vanTiles"></div>`);
+  const phEl = $('.vanPhrase', el), tilesEl = $('.vanTiles', el), supEl = $('.supports', el), pal = $('.vanPal', el), bar = $('.vanProg i', el);
+  cleanup = () => { alive = false; };
+  loopAnim(pal, 'bob1');
+  function drawSup(s) {
+    supEl.innerHTML = [['au', '🔊'], ['pic', '🖼️'], ['let', '🔤']].map(([k, ic]) => `<span class="sup ${s[k] ? 'on' : 'off'} ${k === 'let' && s.let === 1 ? 'half' : ''}" data-s="${k}">${E(ic)}</span>`).join('');
   }
+  async function phrase() {
+    if (!alive) return;
+    if (n >= N) return finish();
+    n++; bar.style.width = ((n - 1) / N * 100) + '%';
+    const my = ++pid, still = () => alive && my === pid;
+    const ph = vanPhrase(L, lastTpl); lastTpl = ph.tpl;
+    const magic = n === 1 && step > seenStep;   // a support vanishes this round: show it first, then poof
+    const showStep = magic ? Math.min(seenStep, step) : step;
+    ph.toks.forEach(t => { if (t.slot) t.s = Object.assign({}, VSTEP[showStep]); });
+    drawSup(VSTEP[showStep]);
+    let si = ph.toks.findIndex(t => t.slot);
+    phEl.innerHTML = ph.toks.map((t, i) => {
+      const disp = i === 0 ? capFirst(t.t || '') : (t.t || '');
+      if (!t.slot) return `<button class="vw" data-i="${i}">${esc(disp)}${esc(t.p)}</button>`;
+      return `<div class="vslot" data-i="${i}"><span class="vpic emoji">${t.b.e}</span><span class="vlet"></span><span class="vfill"></span></div>${t.p ? `<span class="vp">${esc(t.p)}</span>` : ''}`;
+    }).join(' ');
+    phEl.classList.toggle('long', ph.toks.length > 5);
+    const slotEl = (i) => $(`.vslot[data-i="${i}"]`, phEl);
+    const drawSlot = (i) => { const t = ph.toks[i], e = slotEl(i); if (!e) return; const w = i === 0 ? capFirst(t.b.w) : t.b.w;
+      e.classList.toggle('noPic', !t.s.pic); $('.vlet', e).innerHTML = t.s.let === 2 ? esc(w) : t.s.let === 1 ? `<b>${esc(w[0])}</b>${'<i>_</i>'.repeat(w.length - 1)}` : `<i class="q">?</i>`; };
+    ph.toks.forEach((t, i) => t.slot && drawSlot(i));
+    preload(ph.toks.map(t => ['w', t.slot ? t.b.w : t.t]));
+    $$('.vw', phEl).forEach(b => b.addEventListener('click', () => { const t = ph.toks[+b.dataset.i]; anim(b, 'jump2'); if (step < 4) say(['w', t.t]); }));
+    // read the phrase: fixed words aloud (until the no-help step); a target word only if its 🔊 is on
+    const hlTok = (i) => $$('.vw, .vslot', phEl).forEach(x => x.classList.toggle('hl', +x.dataset.i === i));
+    const readIt = async (all) => {
+      let run = [];
+      const flush = async () => { if (run.length) { const r = run; run = []; await say(r, { gap: 90 }); } };
+      for (let i = 0; i < ph.toks.length; i++) {
+        if (!still()) return; const t = ph.toks[i];
+        if (t.slot && !(t.s.au || all)) { await flush(); if (!still()) return; hlTok(i); tone(660, 0, .12, 'sine', .1); tone(990, .12, .14, 'sine', .08); await wait(520); continue; }
+        run.push({ k: 'w', id: t.slot ? t.b.w : t.t, on: () => hlTok(i) });
+      }
+      await flush();
+    };
+    const intro = n === 1 && !magic ? [line('van_intro')] : [];
+    if (intro.length) { await say(intro); if (!still()) return; }
+    if (magic) {
+      // show the old supports, then make one (or more) vanish with a wand + sparkle poof
+      await wait(700); if (!still()) return;
+      const was = VSTEP[seenStep], now = VSTEP[step];
+      const wand = document.createElement('div'); wand.className = 'wand emoji'; wand.textContent = '🪄'; el.appendChild(wand);
+      const slots = $$('.vslot', phEl);
+      if (wand.animate && slots.length) { const r0 = slots[0].getBoundingClientRect(), r1 = slots[slots.length - 1].getBoundingClientRect(), h = el.getBoundingClientRect();
+        wand.animate([{ transform: `translate(${r0.left - h.left - 40}px, ${r0.top - h.top - 60}px) rotate(-20deg)` }, { transform: `translate(${r1.right - h.left}px, ${r1.top - h.top - 60}px) rotate(20deg)` }], { duration: 1200, easing: 'ease-in-out', fill: 'forwards' }); }
+      SFX.magic(); await wait(900);
+      slots.forEach(s => { burst(s, ['✨', '🌟', '💫']); s.classList.add('poofing'); });
+      SFX.poof();
+      ph.toks.forEach((t, i) => { if (t.slot) { t.s = Object.assign({}, now); setTimeout(() => drawSlot(i), 350); } });
+      setTimeout(() => { drawSup(now); $$('.sup.off', supEl).forEach(x => { burst(x, ['💨', '✨']); }); }, 350);
+      setTimeout(() => { slots.forEach(s => s.classList.remove('poofing')); wand.remove(); }, 900);
+      const cat = now.let === 0 ? 'van_poof_all' : now.let < was.let ? 'van_poof_letters' : now.pic < was.pic ? 'van_poof_pic' : 'van_poof_audio';
+      S.van.seen[L.id] = step; save();
+      await say([line(cat)]); if (!still()) return;
+    } else if (n === 1) { S.van.seen[L.id] = step; save(); }
+    if (step < 4) { await readIt(false); if (!still()) return; }
+    $$('.hl', phEl).forEach(x => x.classList.remove('hl'));
+    nextSlot();
+    function nextSlot() {
+      if (!still()) return;
+      $$('.vslot', phEl).forEach(x => x.classList.remove('cur'));
+      if (si < 0) return phraseDone();
+      const t = ph.toks[si], e = slotEl(si); e.classList.add('cur'); e._w = t.b.w;
+      let miss = 0;
+      tilesEl.innerHTML = t.opts.map(o => `<button class="vtile lt" data-w="${esc(o.w)}">${esc(si === 0 ? capFirst(o.w) : o.w)}</button>`).join('');
+      tilesEl.classList.toggle('four', t.opts.length > 3);
+      $$('.vtile', tilesEl).forEach(b => b.addEventListener('click', async () => {
+        if (!still() || b.disabled) return;
+        if (b.dataset.w === t.b.w) {
+          $$('.vtile', tilesEl).forEach(x => x.disabled = true);
+          slotsTotal++; if (!miss) firstTries++;
+          b.classList.add('right'); flyInto(b, e, t);
+          ladCredit('van', itemScore(miss) * VWEIGHT[step], !miss); addPoints(miss ? 1 : 3, e); S.log.words++;
+          await say([['w', t.b.w], line('cheer') || praise()]); if (!still()) return;
+          si = ph.toks.findIndex((x, j) => j > si && x.slot); nextSlot();
+        } else {
+          miss++; S.hard[t.b.w] = (S.hard[t.b.w] || 0) + 1; SFX.boing(); anim(b, 'shake'); b.classList.add('wrongish'); b.disabled = true;
+          // gentle: bring one support back for this word
+          const s = t.s; let back = false;
+          if (s.let < 2) { s.let++; back = true; } else if (!s.pic) { s.pic = 1; back = true; } else if (!s.au) { s.au = 1; back = true; }
+          drawSlot(si); if (back) { burst(e, ['✨', '💡']); SFX.magic(); }
+          const items = [['p', 'that_says'], ['w', b.dataset.w]]; if (back) items.push(line('van_help')); else items.push(oops());
+          if (t.s.au) items.push(['w', t.b.w]);
+          say(items);
+        }
+      }));
+      if (si === ph.toks.findIndex(x => x.slot) && n === 1) say([line('van_pick')]);
+    }
+    function flyInto(b, e, t) {
+      // the word zooms into its space, the picture pops out and acts, stars explode
+      const f = $('.vfill', e); f.textContent = si === 0 ? capFirst(t.b.w) : t.b.w; e.classList.add('done');
+      const br = b.getBoundingClientRect(), er = e.getBoundingClientRect();
+      if (f.animate) f.animate([{ transform: `translate(${br.left - er.left}px, ${br.top - er.top}px) scale(1.2)` }, { transform: 'translate(0,0) scale(1.3)', offset: .7 }, { transform: 'translate(0,0) scale(1)' }], { duration: 450, easing: 'ease-out' });
+      setTimeout(() => { payoff(e, { cheer: false }); const pic = $('.vpic', e); pic.classList.add('show'); const a = t.b.c === 'V' ? (ACT_OF[t.b.w] || 'jump') : pick(['jump', 'spin', 'bob1', 'dance']); anim(pic, a); anim(pal, t.b.c === 'V' ? (ACT_OF[t.b.w] || 'jump') : 'jump'); }, 380);
+    }
+    async function phraseDone() {
+      tilesEl.innerHTML = '';
+      // whole phrase read back with every word lit, then a big cheer
+      await wait(300); if (!still()) return;
+      ph.toks.forEach(t => { if (t.slot) t.s.au = 1; });
+      await readIt(true); if (!still()) return;
+      $$('.hl', phEl).forEach(x => x.classList.remove('hl'));
+      payoff(phEl, { kind: 'boom' }); const vs = ph.toks.find(t => t.slot && t.b.c === 'V'); anim(pal, vs ? (ACT_OF[vs.b.w] || 'flip') : 'flip');
+      await wait(900); if (!still()) return;
+      phrase();
+    }
+  }
+  function finish() {
+    bar.style.width = '100%';
+    const rate = slotsTotal ? firstTries / slotsTotal : 0; let dir = 0;
+    const extra = {}; extra.pre = () => {
+      if (rate >= .75) { if (step >= 4) S.van.best[L.id] = 4; if (step < 4) { S.van.step[L.id] = step + 1; dir = 1; } }
+      else if (rate < .4 && step > 0) { S.van.step[L.id] = step - 1; S.van.seen[L.id] = step - 1; dir = -1; }
+      if (dir) extra.sayAfter = line(dir > 0 ? 'van_step_up' : 'van_step_down');
+    };
+    ladEnd('van', vanPlay, extra);
+  }
+  nextBtn(el, () => { if (alive) { hush(); phrase(); } }, 'Next phrase');
+  phrase();
+  window.__van = { L, step: () => step, cur: () => { const c = $('.vslot.cur', phEl); return c ? c.dataset.i : null; },
+    answer: (right) => { const c = $('.vslot.cur', phEl); if (!c) return false; const tiles = $$('.vtile:not([disabled])', tilesEl); const want = ph_target(); const b = tiles.find(x => (x.dataset.w === want) === right); if (b) b.click(); return !!b; }, n: () => n };
+  function ph_target() { const c = $('.vslot.cur', phEl); return c ? c._w : null; }
+}
+
+// ================= PICTURE MATCH =================
+// He hears (or reads) a clue and taps the matching picture. Riddles ("It says moo...") give fewer clues as
+// levels rise; attribute pictures (color, size, how many, what it's doing, where) differ by one detail.
+function pmMap() {
+  ladMap('pm', 'pmMap', 'Picture Match', pmPlay);
+  prompt([line('pm_intro') || ['p', 'pick_level']]);
+}
+const PM_ATTRS = ['color', 'size', 'num', 'act', 'place'];
+function pmDefault() { return { color: null, size: null, num: 1, act: null, place: null }; }
+function pmVary(o, attr) {
+  const P = D.PMATCH, c = Object.assign({}, o);
+  if (attr === 'color') c.color = pick(P.COLORS.filter(x => x !== o.color));
+  if (attr === 'size') c.size = o.size === 'big' ? 'little' : 'big';
+  if (attr === 'num') c.num = pick([1, 2, 3].filter(x => x !== o.num));
+  if (attr === 'act') c.act = pick(P.ACTS.filter(x => !o.act || x.w !== o.act.w));
+  if (attr === 'place') c.place = pick(P.PLACES.filter(x => !o.place || x.w !== o.place.w));
+  if (attr === 'noun') c.noun = pick(P.NOUNS.filter(x => x.s !== o.noun.s));
+  return c;
+}
+const pmKey = (o) => [o.noun.s, o.color, o.size, o.num, o.act && o.act.w, o.place && o.place.w].join('|');
+function pmWords(o) {
+  const w = [];
+  const art = o.num === 1 ? 'a' : o.num === 2 ? 'two' : 'three';
+  const next = o.size || o.color || o.noun.s; w.push(art === 'a' && /^[aeiou]/.test(next) ? 'an' : art);
+  if (o.size) w.push(o.size); if (o.color) w.push(o.color); w.push(o.num > 1 ? o.noun.p : o.noun.s);
+  if (o.act) { w.push(o.num > 1 ? 'are' : 'is'); w.push(o.act.w); }
+  if (o.place) w.push(o.place.w);
+  return w;
+}
+function pmCard(o) {
+  const copies = Array.from({ length: o.num }, (_, k) => `<span class="pmA ${o.color ? 'c-' + o.color : ''} ${o.size ? 's-' + o.size : ''}"><span class="emoji">${o.noun.e}</span>${o.act && ACT_TAG[o.act.a] ? `<i class="emoji tag">${ACT_TAG[o.act.a]}</i>` : ''}</span>`).join('');
+  return `${o.place ? `<span class="pmPlace emoji">${o.place.e}</span>` : ''}<span class="pmRow n${o.num}">${copies}</span>`;
+}
+function pmPlay() {
+  RR = { n: 0, ok: 0 };
+  const lvIdx = S.pm.lv, L = D.PMATCH.LEVELS[lvIdx], P = D.PMATCH;
+  const N = 4; let n = 0, alive = true, qid = 0; const recent = S.pm.recent || (S.pm.recent = []);
+  const el = show('match', topBar(`${E(L.icon)} ${esc(L.name)}`, { back: 'match', backIcon: '⬅️' }) + `<div class="vanTop"><div class="pmMode">${E(L.au === 'read' ? '📖' : '👂')}</div><div class="vanProg"><i></i></div></div>
+    <div class="pmClue lt"></div><div class="pmCards"></div>`);
+  const clueEl = $('.pmClue', el), cards = $('.pmCards', el), bar = $('.vanProg i', el);
+  cleanup = () => { alive = false; };
+  function question() {
+    if (!alive) return;
+    if (n >= N) return ladEnd('pm', pmPlay);
+    n++; bar.style.width = ((n - 1) / N * 100) + '%';
+    const my = ++qid, still = () => alive && my === qid;
+    let opts, target, clueItems, clueHtml, sayOf;
+    if (L.kind === 'riddle') {
+      const pool = P.RIDDLES.filter(r => !recent.includes(r.w)); target = pick(pool.length ? pool : P.RIDDLES);
+      recent.push(target.w); if (recent.length > 20) recent.shift();
+      const near = shuffle(P.RIDDLES.filter(r => r.g === target.g && r.w !== target.w)), far = shuffle(P.RIDDLES.filter(r => r.g !== target.g));
+      const dist = (L.dist === 'near' ? near.concat(far) : far).slice(0, L.ch - 1);
+      opts = shuffle([target].concat(dist));
+      let fi = [0, 1, 2]; if (L.attrs === 1) fi = [target.key]; else if (L.attrs === 2) fi = [target.key, shuffle([0, 1, 2].filter(x => x !== target.key))[0]].sort();
+      clueItems = fi.map(j => ['p', `pm-${target.k}-${j}`]);
+      clueHtml = fi.map(j => `<div class="fact" data-j="${j}">${esc(target.f[j])}</div>`).join('');
+      cards.innerHTML = opts.map((o, i) => `<button class="pmCard" data-i="${i}"><span class="pmRow n1"><span class="pmA"><span class="emoji">${o.e}</span></span></span></button>`).join('');
+      sayOf = (o) => [['w', o.w]];
+    } else {
+      let attrs = L.attrs.includes('any1') ? [pick(PM_ATTRS)] : L.attrs.slice();
+      target = pmDefault(); target.noun = pick(P.NOUNS);
+      attrs.forEach(a => { if (a === 'color') target.color = pick(P.COLORS); if (a === 'size') target.size = pick(P.SIZES); if (a === 'num') target.num = pick([1, 2, 3]); if (a === 'act') target.act = pick(P.ACTS); if (a === 'place') target.place = pick(P.PLACES); });
+      opts = [target]; const seen = new Set([pmKey(target)]); let k = 0;
+      const cyc = attrs.concat(L.ch > attrs.length + 1 ? ['noun'] : []);
+      while (opts.length < L.ch && k++ < 60) { const v = pmVary(target, cyc[(opts.length - 1 + k) % cyc.length]); if (!seen.has(pmKey(v))) { seen.add(pmKey(v)); opts.push(v); } }
+      opts = shuffle(opts);
+      const ws = pmWords(target); clueItems = ws.map(w => ['w', w]);
+      clueHtml = `<div class="fact">${ws.map((w, i) => `<span class="cw" data-i="${i}">${esc(i === 0 ? capFirst(w) : w)}</span>`).join(' ')}</div>`;
+      cards.innerHTML = opts.map((o, i) => `<button class="pmCard" data-i="${i}">${pmCard(o)}</button>`).join('');
+      // everything on the cards moves: the action if it is part of the clue, otherwise a happy bob
+      $$('.pmCard', cards).forEach((c, i) => { const o = opts[i]; $$('.pmA', c).forEach((a, j) => loopAnim(a, o.act ? o.act.a : 'bob1', j * 160 + rnd(200))); });
+      sayOf = (o) => pmWords(o).map(w => ['w', w]);
+    }
+    cards.classList.toggle('four', opts.length > 3); cards.classList.toggle('three', opts.length === 3);
+    clueEl.innerHTML = clueHtml; clueEl.classList.toggle('readOnly', L.au === 'read');
+    preload(clueItems.concat(opts.flatMap(sayOf)));
+    let miss = 0, hinted = false, locked = false;
+    const speakClue = () => say(clueItems.map((it, i) => ({ k: it[0], id: it[1], on: () => { $$('.fact, .cw', clueEl).forEach(x => x.classList.remove('hl')); const x = L.kind === 'riddle' ? $$('.fact', clueEl)[i] : $$('.cw', clueEl)[i]; if (x) x.classList.add('hl'); } })), { gap: L.kind === 'riddle' ? 350 : 80 })
+      .then(() => $$('.hl', clueEl).forEach(x => x.classList.remove('hl')));
+    clueEl.onclick = () => { if (L.au === 'read') hinted = true; SFX.tap(); speakClue(); };
+    const intro = [];
+    if (n === 1) intro.push(line(L.au === 'read' ? 'pm_read' : L.kind === 'riddle' ? 'pm_riddle' : 'pm_listen'));
+    lastPrompt = L.au === 'read' ? [line('pm_read')] : clueItems;
+    (async () => { if (intro.length) await say(intro); if (!still()) return; if (L.au !== 'read') speakClue(); })();
+    $$('.pmCard', cards).forEach(c => c.addEventListener('click', async () => {
+      if (!still() || locked || c.disabled) return;
+      const o = opts[+c.dataset.i];
+      if (o === target) {
+        locked = true; $$('.pmCard', cards).forEach(x => { if (x !== c) x.classList.add('fade'); });
+        c.classList.add('right'); payoff(c, { kind: pick(['boom', 'zing']) });
+        // the picture comes alive: every character jumps / does its action in a burst
+        $$('.pmA', c).forEach((a, j) => setTimeout(() => anim(a, o.act ? o.act.a : pick(['flip', 'spin', 'jump']), c), j * 120));
+        const sc = (hinted ? .6 : 1) * itemScore(miss); ladCredit('pm', sc, !miss && !hinted); addPoints(miss ? 1 : 3, c); S.log.matches++;
+        await say([line('pm_yes')].concat(sayOf(o)), { gap: 60 }); if (!still()) return;
+        await wait(500); question();
+      } else {
+        miss++; SFX.boing(); anim(c, 'shake'); c.classList.add('wrongish'); c.disabled = true;
+        say([line('pm_that')].concat(sayOf(o), [line('pm_close')]), { gap: 60 });
+      }
+    }));
+    window.__pm = { L, target, opts, pick: (right) => { const cs = $$('.pmCard', cards); const c = cs.find((x, i) => !x.disabled && (opts[i] === target) === right); if (c) c.click(); return !!c; }, n: () => n };
+  }
+  nextBtn(el, () => { if (alive) { hush(); question(); } }, 'Next one');
+  question();
+}
+
+// ================= ACTION WORDS (v4: a clear, linear ladder) =================
+// Watch & Say → Tap the Action (hear it) → Read It (no sound) → Read & Do (2, 3, then 4 moves in order)
+// → Read the Sentence (pick the matching picture, then watch it). Mix (free play) unlocks as a reward.
+const ACT_OF = {}; D.ACTIONS.forEach(a => { ACT_OF[a.w] = a.a; });
+const actStars = (i) => ladStars('act', i);
+function actMap() {
+  const open = S.act.unlocked >= D.ACT_MIX_AT;
+  ladMap('act', 'actMap', 'Action Words', actPlay, `<button class="mixKey ${open ? '' : 'locked'}" aria-label="Mix">${E(open ? '🔀' : '🔒')}<span>Mix</span></button>`);
+  const mk = $('#actMap .mixKey');
+  mk.addEventListener('click', () => { if (!open) { SFX.boing(); anim(mk, 'shake'); return say(['p', 'level_locked']); } SFX.pop(); actMix(); });
+  prompt([line('act_map') || ['p', 'm_action']]);
+}
+function actionHome() { actMap(); }
+function actPlay() {
+  RR = { n: 0, ok: 0 };
+  const i = S.act.lv, L = D.ACT_LEVELS[i];
+  const pool = D.ACTIONS.slice(L.lo, L.hi), all = D.ACTIONS.slice(0, L.hi).filter(a => a.w !== 'big' && a.w !== 'small');
+  const N = { watch: 6, tap: 6, read: 6, do2: 4, do3: 3, do4: 3, sent: 4, sent2: 4 }[L.kind] || 5;
+  const nCards = i < 3 ? 3 : 4;
+  let n = 0, alive = true, qid = 0, deck = [];
+  const el = show('action', topBar(`${E(L.icon)} ${esc(L.name)}`, { back: 'action', backIcon: '⬅️' }) + `<div class="vanTop"><div class="pmMode">${E({ watch: '👀', tap: '👂', read: '📖' }[L.kind] || '🎬')}</div><div class="vanProg"><i></i></div></div>
+    <div class="actStage"><div class="buddy"><span class="emoji">🐉</span></div></div><div class="actWords"></div>`);
+  const stage = $('.actStage', el), buddy = $('.buddy', el), words = $('.actWords', el), bar = $('.vanProg i', el);
+  cleanup = () => { alive = false; };
+  loopAnim(buddy, 'bob1');
+  buddy.addEventListener('click', () => { SFX.boing(); anim(buddy, 'jump', stage); });
+  const draw = () => { if (!deck.length) deck = shuffle(pool); return deck.pop(); };
+  const ak = (a) => a === 'jump2' ? 'jump' : a;
+  const distinct = (list, n0, notA) => { const out = [], seenA = new Set((notA || []).map(ak)); shuffle(list).forEach(a => { if (out.length < n0 && !seenA.has(ak(a.a))) { seenA.add(ak(a.a)); out.push(a); } }); return out; };
+  const cardHtml = (a) => `<button class="aCard" data-w="${a.w}" data-a="${a.a}"><span class="mini"><span class="emoji">🐉</span></span>${ACT_TAG[a.a] ? `<i class="emoji tag">${ACT_TAG[a.a]}</i>` : ''}</button>`;
+  const startLoops = () => $$('.aCard', words).forEach((c, k) => loopAnim($('.mini', c), c.dataset.a, k * 200));
+  async function act(a, host) { const p = anim(buddy, a, stage); setTimeout(() => burst(buddy, ['💥', '⭐', '✨']), 300); return p; }
+  function next() {
+    if (!alive) return;
+    if (n >= N) return ladEnd('act', actPlay);
+    n++; bar.style.width = ((n - 1) / N * 100) + '%';
+    const my = ++qid, still = () => alive && my === qid;
+    const first = n === 1;
+    if (L.kind === 'watch') {
+      const t = draw();
+      words.innerHTML = `<button class="bigWord lt" data-w="${t.w}">${esc(t.w)}</button>`;
+      const b = $('.bigWord', words); preload([['w', t.w]]);
+      (async () => { if (first) await say([line('act_watch')]); if (!still()) return; act(t.a); await say(['w', t.w]); if (still()) { b.classList.add('pulse'); } })();
+      lastPrompt = ['w', t.w];
+      b.addEventListener('click', async () => {
+        if (!still() || b.disabled) return; b.disabled = true; b.classList.remove('pulse');
+        anim(b, t.a === 'grow' || t.a === 'shrink' ? 'jump' : t.a); payoff(b, { cheer: false }); ladCredit('act', 1, true); addPoints(2, b); S.act.done++;
+        say(['w', t.w]); await act(t.a); if (!still()) return; await say([line('cheer') || praise()]); if (still()) next();
+      });
+    } else if (L.kind === 'tap' || L.kind === 'read') {
+      const t = draw(); const opts = shuffle([t].concat(distinct(all.filter(a => a.w !== t.w), nCards - 1, [t.a])));
+      const reading = L.kind === 'read';
+      words.innerHTML = `${reading ? `<button class="bigWord small lt" data-w="${t.w}">${esc(t.w)}</button>` : `<button class="bigWord small ear" aria-label="Hear it">${E('👂')}</button>`}<div class="aCards">${opts.map(cardHtml).join('')}</div>`;
+      startLoops(); preload(opts.map(a => ['w', a.w]));
+      let miss = 0, hinted = false;
+      $('.bigWord', words).addEventListener('click', () => { SFX.tap(); if (reading) hinted = true; say(['w', t.w]); });
+      lastPrompt = reading ? [line('act_read')] : ['w', t.w];
+      (async () => { if (first) await say([line(reading ? 'act_read' : 'act_tap')]); if (!still()) return; if (!reading) say(['w', t.w]); })();
+      $$('.aCard', words).forEach(c => c.addEventListener('click', async () => {
+        if (!still() || c.disabled) return;
+        if (ak(c.dataset.a) === ak(t.a)) {
+          $$('.aCard', words).forEach(x => x.disabled = true); c.classList.add('right'); payoff(c);
+          ladCredit('act', itemScore(miss) * (hinted ? .6 : 1), !miss && !hinted); addPoints(miss ? 1 : 3, c); S.log.matches++; S.act.done++;
+          if (reading) $('.bigWord', words).classList.add('right'); else $('.bigWord', words).innerHTML = esc(t.w);
+          say(['w', t.w]); await act(t.a); if (!still()) return; await say([line('cheer') || praise()]); if (still()) next();
+        } else {
+          miss++; c.disabled = true; c.classList.add('wrongish'); SFX.boing(); anim(c, 'shake');
+          say([['p', 'that_says'], ['w', c.dataset.w], oops()].concat(reading ? [] : [['w', t.w]]));
+        }
+      }));
+    } else if (L.kind.startsWith('do')) {
+      const k = +L.kind.slice(2), tpls = { 2: ['W and W', 'W then W', 'first W, then W'], 3: ['W, W, then W', 'W and W, then W'], 4: ['W, W, W, then W'] }[k];
+      const seq = distinct(all, k), tpl = pick(tpls); let q = 0;
+      const text = tpl.replace(/W/g, () => seq[q++].w); const raw = text.split(' ');
+      const palette = shuffle(seq.concat(distinct(all.filter(a => !seq.some(s => s.a === a.a)), Math.max(2, (k === 2 ? 4 : 5) - k))));
+      words.innerHTML = `<div class="phrase">${raw.map((w, j) => `<button class="aw lt" data-w="${bare(w)}">${esc(j === 0 ? capFirst(w) : w)}</button>`).join('')}</div><div class="aCards wide">${palette.map(cardHtml).join('')}</div>`;
+      startLoops(); preload(raw.map(w => ['w', bare(w)]));
+      const wordBtns = $$('.phrase .aw', words), moveBtns = wordBtns.filter(b => ACT_OF[b.dataset.w] && seq.some(s => s.w === b.dataset.w));
+      wordBtns.forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.dataset.w]); anim(b, 'jump2'); }));
+      let at = 0, miss = 0, misses = 0;
+      const mark = () => moveBtns.forEach((b, j) => b.classList.toggle('hl', j === at));
+      mark(); lastPrompt = [line('act_do')];
+      if (first) say([line('act_do')]);
+      $$('.aCard', words).forEach(c => c.addEventListener('click', async () => {
+        if (!still() || at >= seq.length) return;
+        if (ak(c.dataset.a) === ak(seq[at].a)) {
+          const w = seq[at].w; moveBtns[at].classList.add('right'); c.classList.add('pop'); setTimeout(() => c.classList.remove('pop'), 400);
+          SFX.zing(); burst(c, ['⭐', '✨']); say(['w', w]); at++; mark(); misses += miss ? 1 : 0; miss = 0;
+          await act(seq[at - 1].a); if (!still()) return;
+          if (at >= seq.length) {
+            // the whole combo: read it, Sparky does every move in a row, then a big boom
+            hush(); await say(raw.map((w, j) => ({ k: 'w', id: bare(w), on: () => wordBtns.forEach((b, x) => b.classList.toggle('hl', x === j)) })), { gap: 80 }); if (!still()) return;
+            for (const s of seq) { if (!still()) return; await act(s.a); }
+            wordBtns.forEach(b => b.classList.remove('hl')); payoff(buddy, { kind: 'boom' });
+            ladCredit('act', misses ? .6 : 1.2, !misses); addPoints(misses ? 2 : 4, buddy); S.log.matches++; S.act.done++;
+            await say([praise()]); if (still()) next();
+          } else if (at > 0) say([line('act_next_move')]);
+        } else {
+          miss++; SFX.boing(); anim(c, 'shake');
+          say(miss >= 2 ? [['p', 'that_says'], ['w', c.dataset.w], ['w', seq[at].w]] : [['p', 'that_says'], ['w', c.dataset.w], oops()]);
+        }
+      }));
+    } else {
+      // Read the Sentence: read it (no sound unless he taps a word), pick the matching picture, then it acts out
+      const long = L.kind === 'sent2', R = D;
+      const mk = () => ({ noun: pick(R.RACE_NOUNS), verb: pick(R.RACE_VERBS.filter(v => v.a !== 'grow')), adj: long ? pick(R.RACE_ADJS.filter(a => ['big', 'little', 'red', 'blue', 'green', 'pink', 'purple', 'yellow', 'orange'].includes(a.w))) : null, place: long ? pick(R.RACE_PLACES) : null });
+      const t = mk(), vary = (o, f) => { const c = Object.assign({}, o); if (f === 'noun') c.noun = pick(R.RACE_NOUNS.filter(x => x !== o.noun)); if (f === 'verb') c.verb = pick(R.RACE_VERBS.filter(v => v.a !== o.verb.a && v.a !== 'grow')); if (f === 'adj') c.adj = pick(R.RACE_ADJS.filter(a => a.a !== o.adj.a && ['big', 'little', 'red', 'blue', 'green', 'pink', 'purple', 'yellow', 'orange'].includes(a.w))); if (f === 'place') c.place = pick(R.RACE_PLACES.filter(p => p.e !== o.place.e)); return c; };
+      const fields = long ? ['verb', 'noun', 'adj', 'place'] : ['verb', 'noun', 'verb'];
+      const keyO = (o) => [o.noun.s, o.verb.a, o.adj && o.adj.a, o.place && o.place.e].join('|'), seenO = new Set([keyO(t)]), dist = [];
+      for (let k = 0; dist.length < nCards - 1 && k < 40; k++) { const v = vary(t, fields[k % fields.length]); if (!seenO.has(keyO(v))) { seenO.add(keyO(v)); dist.push(v); } }
+      const opts = shuffle([t].concat(dist));
+      const ws = ['the'].concat(t.adj ? [t.adj.w] : [], [t.noun.s, t.verb.s], t.place ? [t.place.w] : []);
+      const text = capFirst(ws.join(' ')) + '.';
+      const scard = (o) => `<button class="pmCard sCard">${o.place ? `<span class="pmPlace emoji">${o.place.e}</span>` : ''}<span class="pmRow n1"><span class="pmA ${o.adj ? 'c-' + o.adj.a + ' s-' + o.adj.a : ''}"><span class="emoji">${o.noun.e}</span>${ACT_TAG[o.verb.a] ? `<i class="emoji tag">${ACT_TAG[o.verb.a]}</i>` : ''}</span></span></button>`;
+      words.innerHTML = `<div class="phrase">${ws.map((w, j) => `<button class="aw lt" data-w="${w}">${esc(j === 0 ? capFirst(w) : w)}${j === ws.length - 1 ? '.' : ''}</button>`).join('')}</div><div class="pmCards sc ${opts.length > 3 ? 'four' : 'three'}">${opts.map(scard).join('')}</div>`;
+      $$('.sCard', words).forEach((c, j) => loopAnim($('.pmA', c), opts[j].verb.a, j * 150));
+      $$('.phrase .aw', words).forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.dataset.w]); anim(b, 'jump2'); }));
+      preload(ws.map(w => ['w', w])); lastPrompt = [line('act_sent')]; if (first) say([line('act_sent')]);
+      let miss = 0;
+      $$('.sCard', words).forEach((c, j) => c.addEventListener('click', async () => {
+        if (!still() || c.disabled) return; const o = opts[j];
+        if (o === t) {
+          $$('.sCard', words).forEach(x => x.disabled = true); payoff(c); ladCredit('act', itemScore(miss) * 1.2, !miss); addPoints(miss ? 1 : 3, c); S.log.sentences++;
+          await wait(500); if (!still()) return;
+          const sc = buildScene(el, { noun: t.noun, adj: t.adj, verb: t.verb, place: t.place, text, bg: pick(['grass', 'sunny', 'road']) });
+          const acting = sc.act(); await say(ws.map((w, k) => ({ k: 'w', id: w, on: () => sc.hl(k) })), { gap: 70 }); await acting; if (!still()) return;
+          sc.hl(-1); payoff(sc, { kind: 'boom' }); await say([line('cheer') || praise()]); await wait(400); sc.remove(); if (still()) next();
+        } else {
+          miss++; c.disabled = true; c.classList.add('wrongish'); SFX.boing(); anim(c, 'shake');
+          const ow = ['the'].concat(o.adj ? [o.adj.w] : [], [o.noun.s, o.verb.s], o.place ? [o.place.w] : []);
+          say([line('pm_that')].concat(ow.map(w => ['w', w]), [oops()]), { gap: 60 });
+        }
+      }));
+    }
+  }
+  nextBtn(el, () => { if (alive) { hush(); next(); } }, 'Next');
+  next();
+  window.__act = { L, n: () => n };
+}
+// Mix: free play reward (build a silly combo; refresh any word type, or shuffle them all)
+function actMix() {
+  const el = show('action', topBar('Mix', { back: 'action', backIcon: '⬅️' }) + `<div class="actStage"></div><div class="actWords"></div>`);
+  const stage = $('.actStage', el), words = $('.actWords', el);
+  let alive = true; cleanup = () => { alive = false; };
+  if (!S.act.mixSeen) { S.act.mixSeen = 1; save(); }
+  const pickNoun = () => pick(D.RACE_NOUNS), pickAdj = () => pick(D.RACE_ADJS), pickVerb = () => pick(D.RACE_VERBS), pickPlace = () => pick(D.RACE_PLACES);
+  const c = { adj: pickAdj(), noun: pickNoun(), verb: pickVerb(), place: pickPlace() };
+  const TYPES = [['adj', '🎨', pickAdj, x => x.w], ['noun', '🐾', pickNoun, x => x.s], ['verb', '🏃', pickVerb, x => x.s], ['place', '📍', pickPlace, x => x.w]];
+  let playing = 0;
+  const words4 = () => ['the', c.adj.w, c.noun.s, c.verb.s, c.place.w];
+  const text = () => 'The ' + c.adj.w + ' ' + c.noun.s + ' ' + c.verb.s + ' ' + c.place.w + '.';
+  function draw() {
+    stage.innerHTML = '';
+    const sc = buildScene(stage, { noun: c.noun, adj: c.adj, verb: c.verb, place: c.place, text: text() }); sc.classList.add('inStage');
+    words.innerHTML = `<div class="mixRow">${TYPES.map(([k, icon, , txt]) => `<div class="mixCol"><button class="aw lt" data-k="${k}"><span>${esc(txt(c[k]))}</span></button><button class="refreshBtn small" data-r="${k}" aria-label="New ${k}">${E('🔄')}</button></div>`).join('')}
+      <div class="mixCol"><button class="goBtn" aria-label="Go">${E('▶️')}</button><button class="refreshBtn small all" data-all aria-label="Shuffle all">${E('🔀')}</button></div></div>`;
+    preload(words4().map(w => ['w', w]));
+    $$('[data-k]', words).forEach(b => b.addEventListener('click', () => { SFX.tap(); say(['w', b.textContent]); anim(b, 'jump2', words); }));
+    $$('[data-r]', words).forEach(b => b.addEventListener('click', () => { SFX.whoosh(); const t = TYPES.find(x => x[0] === b.dataset.r); let v; do { v = t[2](); } while (v === c[t[0]]); c[t[0]] = v; const sc2 = draw(); say(['w', t[3](v)]); setTimeout(() => sc2.act(), 300); }));
+    $('[data-all]', words).addEventListener('click', shuffleAll);
+    $('.goBtn', words).addEventListener('click', () => goPlay(sc));
+    return sc;
+  }
+  async function goPlay(sc) {
+    const my = ++playing; SFX.whoosh();
+    const acting = sc.act();
+    await say(words4().map((w, i) => ({ k: 'w', id: w, on: () => sc.hl(i) })), { gap: 70 });
+    await acting; if (my !== playing || !alive) return;
+    sc.hl(-1); payoff(sc, { cheer: false }); addPoints(1, sc); say([line('cheer') || praise()]);
+  }
+  function shuffleAll() { SFX.whoosh(); c.adj = pickAdj(); c.noun = pickNoun(); c.verb = pickVerb(); c.place = pickPlace(); const sc = draw(); say(['p', 'shuffle']); setTimeout(() => goPlay(sc), 700); }
+  draw();
+  nextBtn(el, shuffleAll, 'Shuffle all');
+  prompt([['p', 'action_mix']]);
+}
+
+
+// ================= WORD GALLERIES (medal rewards) =================
+// Every medal (bronze, silver, gold on any level) unlocks the next reward: secret words (rare, fun words that
+// say themselves and act), word stickers, and fancy letters that restyle the words all over the game.
+function wgHas(type, id) { return S.wg.got.includes(type + ':' + id); }
+function applyFont() { const h = document.documentElement; D.WG.FONTS.forEach(f => h.classList.remove('font-' + f.id)); if (S.wg.font) h.classList.add('font-' + S.wg.font); }
+function wordGalleries(tab) {
+  tab = tab || S.wg.tab || 'secret'; S.wg.tab = tab; const fresh = S.wg.got.length - (S.wg.seen || 0); S.wg.seen = S.wg.got.length; save();
+  const medals = `<div class="wgMedals">${MEDAL.map((m, t) => `<span class="emoji">${m}</span><b>${S.medals[t]}</b>`).join('')}</div>`;
+  const tabs = [['secret', '🗝️', 'Secret Words'], ['sticker', '🏷️', 'Stickers'], ['font', '🔠', 'Fancy Letters']];
+  const el = show('wg', topBar('Word Galleries') + `<div class="wgHead">${medals}<div class="wgTabs">${tabs.map(([k, ic, nm]) => `<button class="wgTab ${k === tab ? 'on' : ''}" data-t="${k}">${E(ic)}<span>${nm}</span></button>`).join('')}</div></div><div class="wgGrid ${tab}"></div>`);
+  const grid = $('.wgGrid', el);
+  $$('.wgTab', el).forEach(b => b.addEventListener('click', () => { SFX.pop(); wordGalleries(b.dataset.t); }));
+  const order = D.WG.TRACK.filter(r => r[0] === tab).map(r => r[1]);
+  const medalNo = (id) => D.WG.TRACK.findIndex(r => r[0] === tab && r[1] === id) + 1;
+  if (tab === 'font') {
+    grid.innerHTML = `<button class="wgFont ${!S.wg.font ? 'on' : ''}" data-f=""><span class="sample">Abc</span><span class="nm">Regular</span></button>` + D.WG.FONTS.map(f => wgHas('font', f.id)
+      ? `<button class="wgFont f-${f.id} ${S.wg.font === f.id ? 'on' : ''}" data-f="${f.id}"><span class="sample font-${f.id}-s">Abc</span><span class="nm">${E(f.e)} ${esc(f.name)}</span></button>`
+      : `<button class="wgFont locked" data-lock="${medalNo(f.id)}"><span class="sample">🔒</span><span class="nm">${E('🏅')} ${medalNo(f.id)}</span></button>`).join('');
+  } else {
+    const list = tab === 'secret' ? D.WG.SECRET : D.WG.STICKERS;
+    grid.innerHTML = order.map(id => { const x = list.find(v => v.w === id); return wgHas(tab, id)
+      ? `<button class="wgItem ${tab}" data-w="${esc(x.w)}" data-a="${x.a}"><span class="emoji">${x.e}</span><b class="lt">${esc(x.w)}</b></button>`
+      : `<button class="wgItem locked" data-lock="${medalNo(id)}"><span class="emoji">❔</span><b>${E('🏅')} ${medalNo(id)}</b></button>`; }).join('');
+  }
+  $$('[data-lock]', grid).forEach(b => b.addEventListener('click', () => { SFX.boing(); anim(b, 'shake'); say([line('wg_locked'), ['p', 'medal_count']].slice(0, 1)); }));
+  $$('.wgItem[data-w]', grid).forEach(b => b.addEventListener('click', () => {
+    const w = b.dataset.w, a = b.dataset.a; payoff(b, { kind: pick(['boom', 'zing', 'crash']) }); anim(b.firstElementChild, a || 'jump');
+    if (a === 'launch' || a === 'roar') fxAt(b, pick(['💥', '🔥', '✨']), 0, -80, 900);
+    say(tab === 'secret' && rnd(3) === 0 ? [line('wg_secret'), ['w', w]] : [['w', w]]);
+  }));
+  $$('.wgFont[data-f]', grid).forEach(b => b.addEventListener('click', () => {
+    S.wg.font = b.dataset.f; save(); applyFont(); $$('.wgFont', grid).forEach(x => x.classList.toggle('on', x === b));
+    payoff(b, { kind: 'zing', cheer: !!b.dataset.f }); say(b.dataset.f ? [line('wg_font_on')] : [['p', 'font_off']]);
+  }));
+  prompt(fresh > 0 ? [line('reward_' + tab) || line('wg_intro')] : [line('wg_intro')]);
+  window.__wg = { tab, count: () => $$('.wgItem:not(.locked), .wgFont:not(.locked)', grid).length };
 }
 
 // ================= GALLERY =================
@@ -1162,9 +1608,18 @@ function gallery(ri) {
       confetti: '<div class="dec emoji l-spin" style="left:10%;top:16%;font-size:5vmin">🎉</div><div class="dec emoji l-spin" style="right:10%;top:16%;font-size:5vmin">🎊</div>'
     }[id] || '')).join('');
     const lvl = roomLevel(room), k = room.items.length > 12 ? .74 : 1;
+    // v4: the 11 newer rooms get a measured grid (no overlaps at any screen size); the first 7 keep their hand layout
+    const W = roomEl.clientWidth, H = roomEl.clientHeight; let grid = null;
+    if (ri >= 7 && W > 50 && H > 50) {
+      const n = room.items.length, top = Math.max(40, H * .12), H2 = H - top - 4; let best = null;
+      for (let c = 3; c <= 10; c++) { const r = Math.ceil(n / c), cell = Math.min(W / c, H2 / r); if (!best || cell > best.cell) best = { c, r, cell }; }
+      grid = room.items.map((it, i) => { const row = Math.floor(i / best.c), col = i % best.c, inRow = Math.min(best.c, n - row * best.c), cw = W / best.c, x0 = (W - inRow * cw) / 2;
+        return { x: (x0 + (col + .5) * cw) / W * 100, y: (top + (row + .5) * H2 / best.r) / H * 100, f: Math.min(cw, H2 / best.r) * .56 * (.88 + Math.max(0, Math.min(1, (it[5] - 12) / 6)) * .12) }; });
+    }
+    const pos = (it, i) => grid ? `left:${grid[i].x.toFixed(2)}%;top:${grid[i].y.toFixed(2)}%;font-size:${grid[i].f.toFixed(0)}px` : `left:${it[3]}%;top:${it[4]}%;font-size:${(it[5] * k).toFixed(1)}vmin`;
     roomEl.innerHTML = amb + dec + `<div class="fillBar">${E(room.icon)} ${own.length}/${room.items.length}<span class="bar"><i style="width:${own.length / room.items.length * 100}%"></i></span><span class="rLv">${'⭐'.repeat(lvl)}${'☆'.repeat(Math.max(0, 4 - lvl))}</span></div>` +
-      room.items.map((it, i) => own.includes(i) ? `<div class="item ${i === newIdx ? 'new' : ''} ${it[6] === 'glow' ? 'glowable' : ''}" data-i="${i}" style="left:${it[3]}%;top:${it[4]}%;font-size:${(it[5] * k).toFixed(1)}vmin"><span class="emoji">${it[1]}</span></div>`
-        : `<div class="ghost emoji" style="left:${it[3]}%;top:${it[4]}%;font-size:${(it[5] * k).toFixed(1)}vmin">${it[1]}</div>`).join('') +
+      room.items.map((it, i) => own.includes(i) ? `<div class="item ${i === newIdx ? 'new' : ''} ${it[6] === 'glow' ? 'glowable' : ''}" data-i="${i}" style="${pos(it, i)}"><span class="emoji">${it[1]}</span></div>`
+        : `<div class="ghost emoji" style="${pos(it, i)}">${it[1]}</div>`).join('') +
       (unlocked ? '' : `<div class="lockCover"><span class="emoji">🔒</span><span>${esc(D.ROOMS[ri - 1].name)} ${E(D.ROOMS[ri - 1].icon)} ${(S.owned[D.ROOMS[ri - 1].id] || []).length}/${room.need}</span></div>`);
     $$('.item', roomEl).forEach(d => d.addEventListener('click', () => tapItem(+d.dataset.i, d)));
   }
@@ -1280,6 +1735,8 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('dblclick', e => e.preventDefault());
 document.addEventListener('touchmove', e => { if (!e.target.closest('.shop, .roomTabs, .card, .levelMap, .shelves')) e.preventDefault(); }, { passive: false });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hush(); });
-window.__app = { S: () => S, save, go, addPoints, say, AU, D, reader, gallery, actionHome, rainPlay, racePlay, speakable, clip, loadBuf, anim };
+let rsT = 0; window.addEventListener('resize', () => { clearTimeout(rsT); rsT = setTimeout(() => { if ($('#gallery.show') && window.__gallery) window.__gallery.renderRoom(); }, 250); });
+window.__app = { S: () => S, save, go, addPoints, say, AU, D, reader, gallery, actionHome, actPlay, actMix, vanPlay, pmPlay, rainPlay, racePlay, wordGalleries, medalAward, roundDone, speakable, clip, loadBuf, anim, ladStars };
+applyFont();
 start();
 })();

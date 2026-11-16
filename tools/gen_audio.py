@@ -53,6 +53,7 @@ for p in D['ACTION_PHRASES']:
 for r in D['ROOMS']:
     addw(r['name'])
     for it in r['items']: addw(it[0])
+for w in C.get('AUDIO_WORDS', []): addw(w)
 # pronunciation fixes for single words read in isolation
 FIX = {'read': 'read', 'i': 'I', 'a': 'a', 'the': 'the', 'yo-yo': 'yo-yo', 'lead': 'lead', 'wes': 'Wes', 'sam': 'Sam', 'max': 'Max', 'dot': 'Dot', 'luna': 'Luna', 'ember': 'Ember', 'us': 'us', 'live': 'live', 't-rex': 'T. rex', 'dodo-bird': 'dodo bird', 'zoe': 'Zoe', 'jake': 'Jake', 'mike': 'Mike', 'kay': 'Kay', 'ray': 'Ray', 'gail': 'Gail', 'bart': 'Bart', 'mark': 'Mark', 'ruby': 'Ruby', 'zed': 'Zed', 'pete': 'Pete', 'gus': 'Gus', 'ben': 'Ben', 'sparky': 'Sparky', 'chip': 'Chip', 'sir': 'Sir', 'rex': 'rex'}
 for k, v in FIX.items():

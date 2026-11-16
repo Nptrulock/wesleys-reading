@@ -32,3 +32,19 @@ banana:🍌 orange:🍊 grapes:🍇 pizza:🍕 pasta:🍝 bread:🍞 juice:🧃 
 dinosaur:🦕 umbrella:☂️ computer:💻 volcano:🌋 skeleton:💀 adventure:🗺️ caterpillar:🐛 helicopter:🚁 alligator:🐊 motorcycle:🏍️ crocodile:🐊 basketball:🏀 avocado:🥑 pineapple:🍍 kangaroos:🦘
 snow:❄️ eye:👁️ eyes:👀 music:🎵 mountain:⛰️ family:👪 children:🧒 animal:🐾 picture:🖼️ paper:📄 letter:✉️ morning:🌅 world:🌍 heart:❤️
 """.split())
+# v4: pictures for more Letter Rain words (emoji 13 or older only, so older iPads show them)
+EMOJI.update(dict(x.split(':', 1) for x in """
+sat:🪑 ran:🏃 tan:🟤 tap:🚰 lap:🏁 gap:🕳️ rag:🧽 wag:🐕 pad:🗒️ mad:😠 bad:👎 big:🐘 jig:💃 dip:🏊 sip:🥤 tip:👆 hit:⚾ pit:🍑 fit:💪 lit:🕯️ rim:🏀 dim:🌒 hid:🙈 fix:🔧
+got:🎁 not:❌ rob:🦹 on:🔛 mom:👩 dug:⛏️ rub:🧴 hum:🎶 yum:😋 fed:🍼 wed:💒 met:🤝 set:🍽️
+blue:🔵 come:👋 down:⬇️ funny:😂 help:🆘 little:🐁 one:1️⃣ three:3️⃣ two:2️⃣ yellow:🟡 black:⚫ four:4️⃣ good:👍 look:👀 no:🚫 white:⚪ she:👧 he:👦 we:👫 you:👉 me:🙋
+eight:8️⃣ cold:🥶 fast:💨 small:🐭 warm:☀️ laugh:😂 drink:🥤 grow:🌱 fall:🍂 show:🎪 start:🏁 write:✍️ read:📖 wash:🧼 buy:🛒 call:📞 work:🔨 see:👀 go:🟢 away:👋 here:📍
+old:👴 walk:🚶 think:🤔 thank:🙏 give:🎁 ask:🙋 live:🏠 new:🆕 pretty:🌸 please:🙏 make:🔨 like:❤️ ate:🍽️ open:🔓 under:⬇️ say:💬 play:🎮 four:4️⃣
+shut:🚪 shin:🦵 shot:💉 rush:💨 mash:🥔 dash:🏃 hush:🤫 chat:💬 check:✅ chug:🚂 thin:📏 thick:📚 sack:🎒 dock:⚓ lick:👅 sick:🤒 pick:⛏️ luck:🍀 long:🐍 bang:💥 hang:🧥
+flap:🦅 flat:📄 flop:🐟 glad:😊 plan:🗺️ slam:🚪 slap:👋 slip:🍌 grab:✊ grip:🤝 trot:🐴 crop:🌾 dress:👗 grass:🌿 snip:✂️ stem:🌱 skip:💃 swam:🏊 swing:🎠 skid:🚲 smog:🌫️ snug:🛌 spill:🥛 smell:👃
+best:🥇 rest:🛋️ test:📝 fist:✊ lump:🪨 land:🏝️ hunt:🔍 soft:🧸 tell:🗣️ fell:🍂 fill:🪣 pill:💊 miss:🎯 boss:👔 moss:🌿 mess:🧦 fuss:😤 off:📴 fizz:🥤 jazz:🎷
+wake:⏰ name:📛 gave:🎁 save:💾 late:⏰ shape:🔷 hike:🥾 bite:😬 dime:🪙 line:➖ fine:👌 mine:⛏️ wide:↔️ shine:✨ hope:🤞 hose:🚿 vote:🗳️ stove:♨️ cute:🥰 tune:🎵 rule:📏 pain:🤕 wait:⏳ way:🛣️ pay:💵
+gray:☁️ week:📅 seat:💺 clean:🧼 coach:📣 foam:🧽 moat:🏰 right:➡️ sight:👀 might:💪 bright:🔆 flight:✈️ tight:🪢 dry:🌵 try:💪 shy:🙈 why:❓ noon:🕛 far:🔭 sharp:🔪 smart:🧠 born:🐣 sort:🗂️
+porch:🏡 herd:🐄 first:🥇 third:🥉 stir:🥄 burn:🔥 hurt:🤕 loud:📢 proud:🏅 sound:🔉 found:🔍 wow:🤩 howl:🐺 growl:🐻 boil:♨️ join:🤝 soil:🟫 enjoy:😄 royal:👑 jaw:😮 raw:🥩 crawl:🐛 haul:🚚 launch:🚀
+dresses:👗 helping:🤝 looking:👀 rested:🛌 landed:🛬 filled:🪣 around:🔄 bedroom:🛏️ scales:⚖️ orbit:🪐 build:🏗️ carry:🧺 hold:🤲 kind:💝 today:📅 together:🤝 thought:💭 beautiful:🌺
+people:👪 friend:🧑‍🤝‍🧑 answer:💡 story:📖 heard:👂 special:🌟 learn:🎓 question:❓ invisible:👻 celebration:🎉 calendar:📅 caravan:🐪 sleepy:😪 happy:😄 silly:🤪 tiny:🐜 shiny:✨ hungry:🍽️ noisy:📢 brave:🦸
+""".split()))
