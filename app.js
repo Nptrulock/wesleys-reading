@@ -430,7 +430,7 @@ function parentPanel() {
   <label>Letter Rain says ${sel('pSnd', ['letter sounds for decodable words, names for others (default)', 'always letter sounds', 'always letter names'], ['auto', 'sounds', 'names'].indexOf(S.letterSounds))}</label>
   <label>Voice player ${sel('pEng', ['Web Audio — smooth, gapless (default)', 'HTML audio — use if the iPad is on silent and you hear nothing'], S.engine === 'html' ? 1 : 0)}</label>
   <h3>Sound check</h3><button class="pbtn" id="pTest">▶ Play a test word</button> <span id="pTestRes" class="note"></span>
-  <h3>Offline</h3><div class="note">Sounds are saved for offline use as Wesley plays each level, story and room. To save all ${speakable().length} sounds now (about 25 MB), tap below on Wi-Fi.</div><button class="pbtn" id="pDl">⬇ Save all sounds for offline</button> <span id="pDlRes" class="note"></span>
+  <h3>Offline</h3><div class="note">Sounds are saved for offline use as Wesley plays each level, story and room. To save all ${speakable().length} sounds now (about 21 MB), tap below on Wi-Fi.</div><button class="pbtn" id="pDl">⬇ Save all sounds for offline</button> <span id="pDlRes" class="note"></span>
   <div class="note">App build ${window.APP_BUILD || '?'}. Audio engine now: ${useWA() ? 'Web Audio' : 'HTML audio'} (context ${ctx ? ctx.state : 'none'}). Voice clips are recorded MP3s (${M.voice || 'neural voice'}). Played: ${AU.log.length}, failed: ${AU.errors.length}, robot-voice fallback used: ${AU.fallbacks}. If you hear nothing, check the iPad volume and that the side switch is not on silent.</div>
   <h3>Stars & reset</h3>
   <button class="pbtn" id="pGift">+10 stars</button> <button class="pbtn danger" id="pReset">Reset all progress</button>
@@ -588,7 +588,7 @@ function rainPlay() {
       need = blanks.map(i => gs[i]); it.blanks = blanks;
     }
     if (picEl.textContent === '🔊') picEl.classList.add('listen');
-    slotsEl.classList.toggle('long', gs.join('').length > 6); slotsEl.classList.toggle('words', isWordV());
+    slotsEl.classList.toggle('long', gs.join('').length > 6); slotsEl.classList.toggle('xlong', gs.length > 8 && !isWordV()); slotsEl.classList.toggle('words', isWordV());
     const hideGuide = v !== 'spell' || lvIdx >= 28 || it.review;
     slotsEl.innerHTML = gs.map((g, i) => `<div class="slot lt ${filled.includes(i) ? 'on pre' : hideGuide ? 'blank' : ''}">${g === '?' ? '' : esc(S.upper && !isWordV() ? g.toUpperCase() : g)}</div>`).join('');
     markNext();

@@ -396,3 +396,12 @@ button { font-family: inherit; color: inherit; border: 0; background: none; padd
 .rbg-road { background: linear-gradient(#90caf9 0 55%, #616161 55%); } .rbg-room { background: linear-gradient(#ffe0b2 0 65%, #a1887f 65%); }
 @media (orientation: portrait) { .goalChip { font-size: 3.4vmin; } .itemLabel { font-size: 4vmin; } }
 .slot.blank:not(.on) { color: transparent; }
+/* v3 layout fixes: long words + long sentences on small screens */
+.rainHead { flex-wrap: nowrap; }
+.rainProg { position: absolute; right: 1.6vmin; bottom: .6vmin; min-width: 0; font-size: 2.4vmin; flex-direction: row; }
+.rainProg .bar { width: 9vmin; height: 1.2vmin; }
+.rainHead { padding-bottom: 2.4vmin; }
+.slots.xlong .slot { min-width: 5vmin; font-size: 5.6vmin; height: 8.4vmin; padding: 0 .3vmin; }
+.slots.xlong { gap: .6vmin; }
+#race .showtime .sentence { padding-right: calc(max(26vmin, 120px) + var(--sar)); text-align: left; padding-left: 3vmin; }
+@media (orientation: portrait) { #race .showtime .sentence { padding-right: 3vmin; text-align: center; margin-bottom: calc(max(12vmin, 76px) + var(--sab)); } .rainPic { font-size: 10vmin; } }
