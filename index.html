@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Wes Reads">
+<meta name="theme-color" content="#5b8def">
+<title>Wesley's Reading Adventure</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div id="start" class="screen show">
+    <div class="startSky"><span class="cloud c1">☁️</span><span class="cloud c2">☁️</span><span class="sunny">☀️</span></div>
+    <div class="startTitle"><span>Wesley's</span><b>Reading Adventure</b></div>
+    <div class="startPals"><span class="a-bob">🐉</span><span class="a-jump">📖</span><span class="a-bob2">🏰</span></div>
+    <button id="startBtn" class="bigGo" aria-label="Tap to start"><span class="play">▶</span><span>Tap to start</span></button>
+    <div id="loadNote" class="loadNote"></div>
+  </div>
+</div>
+<div id="fx"></div>
+<script src="data.js"></script>
+<script src="audio/manifest.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
