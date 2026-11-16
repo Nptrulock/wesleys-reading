@@ -327,3 +327,4 @@ button { font-family: inherit; color: inherit; border: 0; background: none; padd
 #action .actModes .modeBtn { padding: 1vmin 2.2vmin; }
 .updBanner { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--sab) + 2vmin); z-index: 100; background: #263238; color: #fff; font-size: 18px; font-weight: 700; padding: 14px 22px; border-radius: 99px; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
 @media (orientation: portrait) { .mixRow .aw { font-size: 4.6vmin; min-width: 0; } }
+#action .actWords, .garageWrap { padding-bottom: calc(max(12vmin, 80px) + var(--sab)); }
