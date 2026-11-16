@@ -70,7 +70,7 @@ function playSrc(src, my, onTime) {
     const fin = (ok) => { if (done) return; done = true; cancelAnimationFrame(raf); a.onended = a.onerror = null; res(ok); };
     a.onended = () => fin(true); a.onerror = () => { AU.errors.push(src); fin(false); };
     try {
-      a.src = src; a.currentTime = 0;
+      a.src = src;
       const rec = { src, t: Date.now(), ok: null }; AU.log.push(rec); if (AU.log.length > 300) AU.log.shift();
       const p = a.play();
       if (p && p.then) p.then(() => { rec.ok = true; }).catch(err => { rec.ok = false; rec.err = String(err && err.name); AU.errors.push(src + ' ' + rec.err); fin(false); });
