@@ -107,8 +107,9 @@ with sync_playwright() as p:
         pg.evaluate("window.__animLog.length=0"); tap(pg, '.goBtn'); pg.wait_for_timeout(1500)
         pg.screenshot(path=SHOTS + f'v3-{tag}-readdo-level7.png')
         pg.wait_for_timeout(9000)
-        al = pg.evaluate("__animLog.filter(r=>r.end&&!['jump2'].includes(r.a)).map(r=>[r.a,Math.round(r.start),Math.round(r.end)])")
         acts = [w for w in ws if pg.evaluate("w=>__app.D.ACTIONS.some(a=>a.w===w)", w)]
+        want = pg.evaluate("ws=>__app.D.ACTIONS.filter(a=>ws.includes(a.w)).map(a=>a.a)", acts)
+        al = pg.evaluate("want=>__animLog.filter(r=>r.end&&want.includes(r.a)).map(r=>[r.a,Math.round(r.start),Math.round(r.end)])", want)
         seq_ok = all(al[i + 1][1] >= al[i][2] - 30 for i in range(len(al) - 1))
         rec(f'{tag} action level 7 phrase "{" ".join(ws)}": {len(acts)} actions one after another', len(acts) >= 2 and len(al) >= len(acts) and seq_ok, al)
         pg.evaluate("__app.actionHome('explore')"); pg.wait_for_timeout(400); tap(pg, '[data-lv]'); pg.wait_for_timeout(500)
