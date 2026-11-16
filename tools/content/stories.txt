@@ -1,0 +1,169 @@
+# id|title|cover|color|level ; then page lines: bg|text|emoji x y size anim, ...
+@pig|The Pig in the Mud|🐷|#f8bbd0|1
+mud|A pig is in the mud.|🐷 50 62 24 bob
+mud|The pig can dig.|🐷 45 60 22 wiggle
+mud|Dig, pig, dig!|🐷 50 60 22 shake, 💦 30 50 10 float, 💦 70 50 10 float
+mud|The pig sat in a big tub.|🛁 50 68 30 , 🐷 50 52 18 bob
+sunny|Now the pig is pink!|🐷 50 58 24 dance, ✨ 70 30 10 twinkle
+sunny|Then the pig ran to the mud. The end.|🐷 50 62 22 zoom
+@hen|The Hen and Ten Eggs|🐔|#fff59d|1
+grass|A red hen sat on ten eggs.|🐔 50 58 24 bob, 🥚 30 78 8 , 🥚 70 78 8 
+grass|The hen sat and sat.|🐔 50 60 24 sleep, 💤 66 38 10 float
+grass|Tap, tap, tap!|🥚 35 70 14 shake, 🥚 65 70 14 shake
+sunny|Peep! Peep! Ten chicks!|🐤 25 66 12 jump, 🐤 45 70 12 jump2, 🐤 65 66 12 jump, 🐤 82 70 12 jump2
+sunny|The hen is glad.|🐔 50 56 26 dance, 🐤 25 74 10 bob, 🐤 75 74 10 bob
+@dog|Dot the Dog|🐶|#ffe0b2|1
+grass|Dot is a dog.|🐶 50 60 26 bob
+grass|Dot can dig a pit.|🐶 45 58 22 shake, 🕳️ 65 76 16 
+grass|Dot got a big red ball.|🐶 40 60 22 jump, 🔴 66 66 12 roll
+sunny|Dot ran and ran.|🐶 50 62 22 zoom
+night|Dot is in bed. Nap, Dot, nap.|🛏️ 50 70 32 , 🐶 50 54 16 sleep, 💤 66 36 10 float
+@sun|Fun in the Sun|☀️|#ffcc80|2
+sunny|It is hot. The sun is up.|☀️ 50 28 26 spin
+sea|Max and Gus run to the sand.|👦 38 62 18 zoom, 🧒 62 62 18 zoom
+sea|They dig and dig.|🏖️ 50 72 28 , 👦 35 56 14 shake, 🧒 65 56 14 shake
+sea|Max and Gus make a big sand castle.|🏰 50 60 30 grow
+sea|A crab sat on top!|🏰 50 64 28 , 🦀 50 36 12 wiggle
+sunset|What a fun day!|🌅 50 40 26 , 👦 35 70 14 bob, 🧒 65 70 14 bob
+@fish|Fish Wish|🐠|#80deea|2
+sea|A fish had a wish.|🐠 50 56 22 swim
+sea|"I wish I had legs," said the fish.|🐠 45 56 22 wiggle, 💬 68 32 12 float
+sea|A frog hops up. "Legs are fun!"|🐸 40 60 18 jump, 🐠 70 58 16 swim
+sea|But the fish can swim fast.|🐠 50 56 20 zoom
+sea|"I can swim! I like my fins!"|🐠 50 56 24 dance, 💦 30 40 10 float, 💦 70 40 10 float
+@truck|The Big Red Truck|🚒|#ef9a9a|2
+road|The big red truck can go fast.|🚒 50 62 30 zoom
+road|Ding! Ding! It has a bell.|🚒 50 62 30 shake, 🔔 70 30 12 wiggle
+road|Up the hill it went.|⛰️ 50 60 40 , 🚒 50 40 14 bob
+road|A cat is up in a tree!|🌳 50 52 40 , 🐱 50 34 12 shake
+road|The truck has a long ladder.|🚒 30 70 22 , 🪜 55 50 22 grow
+sunny|The cat is safe. Yay, truck!|🐱 40 62 18 dance, 🚒 68 64 22 bob
+@chick|Chip the Chick|🐥|#fff59d|3
+grass|Chip is a chick. She is a little chick.|🐥 50 60 20 bob
+grass|Chip wants to fly.|🐥 50 60 20 jump, 🦅 70 24 14 fly
+grass|She flaps and flaps.|🐥 50 58 20 shake
+grass|She hops on a rock. Jump, Chip!|🪨 50 74 26 , 🐥 50 52 16 jump2
+sky|Flap, flap! She can fly a little!|🐥 50 42 18 fly, ☁️ 25 22 14 float, ☁️ 75 26 14 float
+sunny|Chip is so glad.|🐥 50 56 24 dance, ⭐ 75 28 10 spin
+@knight|The Brave Knight|🛡️|#b0bec5|3
+castle|Sir Ben is a brave knight.|🤺 50 60 26 bob
+castle|He has a shield and a red flag.|🛡️ 35 60 18 wiggle, 🚩 65 50 18 wiggle
+castle|"I will help the king," he said.|🤺 35 62 20 bob, 🤴 66 58 22 wave
+hill|He rode his horse up the hill.|🐎 50 58 26 zoom
+cave|He found a cave. What is in it?|🕳️ 50 60 30 , ❓ 70 34 12 bob
+cave|A sad little dragon!|🐲 50 60 24 shake
+sunny|Sir Ben gave him a hug. Now they are pals!|🤺 38 62 18 dance, 🐲 64 60 20 dance, 💖 50 30 12 float
+@crab|Crab Shell|🦀|#ffab91|3
+sea|Crab had a shell. It was too small.|🦀 50 62 22 shake, 🐚 70 70 10 
+sea|"I need a big shell," said Crab.|🦀 50 62 22 bob, 💬 70 34 12 float
+sea|Crab got in a cup. Too small!|🥤 50 64 22 , 🦀 50 46 12 wiggle
+sea|Crab got in a can. Too thin!|🥫 50 64 22 , 🦀 50 46 12 wiggle
+sea|Crab got in a big pink shell. Just right!|🐚 50 64 30 grow, 🦀 50 50 12 dance
+@cake|Jake Bakes a Cake|🎂|#f8bbd0|4
+room|Jake will bake a cake.|👦 40 60 22 bob, 🎂 70 66 16 
+room|He gets eggs and milk.|🥚 35 64 14 bob, 🥛 65 64 16 bob
+room|Mix, mix, mix!|🥣 50 64 26 spin
+room|Bake it in the hot stove.|🔥 50 66 22 flicker
+room|The cake is so big! It is a huge cake!|🎂 50 58 36 grow
+room|Jake and his pals ate the cake.|🎂 50 66 22 , 👦 25 58 14 dance, 👧 75 58 14 dance
+@kite|Mike's Kite|🪁|#b3e5fc|4
+sky|Mike has a kite. It is white and red.|🪁 50 40 26 wiggle, 👦 50 80 14 
+sky|The wind blew. Up went the kite!|🪁 50 26 22 fly, 💨 30 40 12 float
+sky|The kite went up so high.|🪁 50 16 16 float, ☁️ 30 40 14 float
+sky|Oh no! It is stuck in a tree!|🌳 50 56 40 , 🪁 50 30 14 shake
+sky|A bird helped. Tug, tug, tug!|🐦 40 30 14 fly, 🪁 60 30 14 wiggle
+sunny|Mike has his kite. What a nice day!|👦 40 64 18 dance, 🪁 65 34 18 fly
+@rocket|Rocket to the Moon|🚀|#9fa8da|4
+space|Zoe has a rocket ship.|🚀 50 60 30 bob, 👧 72 76 12 wave
+space|Three, two, one... blast off!|🚀 50 50 28 fly, 🔥 50 84 14 flicker
+space|Zoom! Zoe flew past the stars.|🚀 30 50 20 zoom, ⭐ 70 20 8 twinkle, ⭐ 20 30 8 twinkle
+space|She landed on the moon.|🌕 50 70 46 , 🚀 50 40 16 bob
+space|The moon has big holes. Hop, hop, hop!|👩‍🚀 50 54 22 jump
+space|Zoe waved at Earth. Then she went home.|🌍 70 30 20 spin, 🚀 35 60 18 fly
+@rain|Rain Day|🌧️|#90caf9|5
+sky|Gray clouds came. Drip, drip, drip.|🌧️ 50 30 26 float
+grass|Rain fell on the hill.|💧 30 40 8 fall, 💧 55 30 8 fall, 💧 75 45 8 fall
+grass|Kay put on her coat and boots.|👧 50 60 22 bob, 🧥 30 70 12 , 👢 70 76 12 
+mud|She jumped in a big puddle. Splash!|👧 50 54 20 jump, 💦 30 70 12 float, 💦 70 70 12 float
+sunny|Then the sun came out. Look! A rainbow!|🌈 50 34 40 grow, ☀️ 82 18 14 spin
+@sheep|Sheep Can't Sleep|🐑|#e1f5fe|5
+night|Little Sheep can't sleep.|🐑 50 62 24 shake, 🌙 78 18 14 
+night|She counts the stars. One, two, three...|⭐ 30 24 8 twinkle, ⭐ 50 18 8 twinkle, ⭐ 70 26 8 twinkle, 🐑 50 70 16 bob
+night|She hears an owl. Hoo! Hoo!|🦉 70 36 18 wiggle, 🐑 35 66 16 shake
+night|Mom Sheep sings a sweet song.|🐑 38 62 24 sing, 🐑 64 66 14 bob
+night|Little Sheep yawns. Now she is asleep.|🐑 50 64 22 sleep, 💤 66 40 10 float
+@train|The Train Ride|🚂|#c5e1a5|5
+grass|Toot, toot! Here comes the train.|🚂 50 62 30 zoom
+grass|Ray and Gail got on the train.|🚃 50 64 30 , 👦 40 54 10 bob, 👧 60 54 10 bob
+hill|The train went up a big hill. Puff, puff!|⛰️ 50 60 44 , 🚂 50 40 16 shake
+grass|It went past cows and goats.|🐄 30 66 18 bob, 🐐 70 66 16 bob, 🚂 50 40 12 zoom
+sunset|At the end of the day, the train came home.|🚉 50 64 30 , 🚂 30 66 18 bob
+@owl|The Night Owl|🦉|#b39ddb|5
+night|Owl wakes up at night.|🦉 50 50 26 wiggle, 🌙 78 18 16 
+night|"Hoo! Who is up?" said Owl.|🦉 45 50 24 sing, 💬 70 30 12 float
+night|"I am!" said a little moth.|🦋 60 40 14 fly, 🦉 35 56 20 bob
+night|"I am!" said a big bat.|🦇 60 36 18 fly, 🦉 35 56 20 bob
+night|They flew under the moon all night.|🦉 30 46 16 fly, 🦇 55 36 14 fly, 🦋 75 46 10 fly
+sunny|In the morning, Owl went to sleep.|🦉 50 56 24 sleep, ☀️ 80 20 14 spin
+@farm|Down on the Farm|🚜|#dce775|6
+grass|Farmer Bart has a big red barn.|👨‍🌾 30 62 20 wave, 🏠 66 56 30 
+grass|The cow says moo. The pig says oink.|🐄 32 62 22 sing, 🐖 68 66 18 sing
+grass|The horse eats hay. Munch, munch.|🐴 50 60 26 bob, 🌾 70 76 12 wiggle
+grass|Bart drives his tractor in the dirt.|🚜 50 64 28 zoom
+sunset|The sun sets. All the animals are home.|🐄 25 70 14 sleep, 🐖 50 72 12 sleep, 🐴 75 68 14 sleep
+@storm|The Storm|⛈️|#90a4ae|6
+sky|Dark clouds roll in. Boom! Thunder!|⛈️ 50 32 30 shake
+sky|Lightning flashes in the sky.|⚡ 40 40 20 flicker, ⚡ 65 30 16 flicker
+room|Mark and his dog hide under a blanket.|👦 45 62 20 shake, 🐶 62 66 16 shake
+room|Mom turns on a lamp. It is warm and bright.|💡 50 30 18 flicker, 👩 40 62 20 bob
+room|They read a book and eat popcorn.|📖 50 58 18 bob, 🍿 70 66 14 wiggle
+sunny|Soon the storm is gone. Hooray!|☀️ 50 30 26 spin, 🌈 50 60 30 grow
+@dragon2|Sparky Learns to Fly|🐉|#ce93d8|6
+cave|Sparky is a little dragon with tiny wings.|🐉 50 60 22 bob
+hill|All the big dragons fly. Sparky can not.|🐲 30 30 16 fly, 🐲 70 24 16 fly, 🐉 50 70 18 shake
+hill|He tries and tries. Flap, flap, bump!|🐉 50 62 20 jump, 💥 60 76 10 float
+hill|His friend the bird says, "Keep trying!"|🐦 70 36 14 fly, 🐉 40 64 18 bob
+sky|Sparky runs, jumps, and flaps... he flies!|🐉 50 36 22 fly, ☁️ 25 60 14 float
+sky|Sparky does a loop in the sky. Woo hoo!|🐉 50 40 22 flip, ✨ 75 24 10 twinkle
+@builder|The Tall Tower|🏗️|#ffe082|7
+road|Bob the builder has a crane.|👷 30 66 18 wave, 🏗️ 64 50 36 
+road|First, they dig a deep hole.|🚜 50 64 26 shake, 🕳️ 70 78 14 
+road|Next, they stack bricks, one by one.|🧱 40 70 14 grow, 🧱 55 70 14 grow, 🧱 47 58 14 grow
+road|The crane lifts big beams up high.|🏗️ 50 50 40 rock
+road|Up, up, up goes the tower!|🏢 50 50 40 grow
+sunny|Look at the tall tower they built together!|🏢 50 50 40 , 👷 25 74 14 dance, 👷 75 74 14 dance
+@pirate|Pirate Pete|🏴‍☠️|#a1887f|7
+sea|Pirate Pete sails his ship on the sea.|⛵ 50 60 32 rock, 🏴‍☠️ 50 30 12 wiggle
+sea|He has a map. X marks the spot!|🗺️ 50 58 30 bob, ❌ 62 56 10 spin
+sea|Pete sails to a small island.|🏝️ 50 62 34 , ⛵ 20 66 16 rock
+sea|He digs and digs in the sand.|🏴‍☠️ 50 56 20 shake, 🕳️ 50 76 14 
+sea|He finds a chest. It is full of gold!|🧰 50 64 26 grow, 🪙 35 48 10 spin, 🪙 65 48 10 spin
+sunset|Pete shares the gold with his crew. Yo ho ho!|🏴‍☠️ 35 64 18 dance, 🦜 65 54 16 sing
+@dino|Dino Day|🦖|#a5d6a7|7
+jungle|Long ago, there were dinosaurs.|🦕 40 56 32 bob, 🌴 80 56 24 
+jungle|T. rex had big teeth. Roar!|🦖 50 58 30 shake
+jungle|The long neck dino ate leaves from the trees.|🦕 50 56 32 bob, 🌳 75 50 26 
+jungle|A baby dino hatched from an egg. Crack!|🥚 50 70 16 shake, 🦖 50 54 14 jump
+jungle|The baby dino stomped and played all day.|🦖 50 60 20 dance
+night|Then the baby dino curled up and fell asleep.|🦖 50 64 20 sleep, 💤 66 40 10 float
+@space2|The Lost Alien|👽|#7986cb|8
+space|A little alien was lost in space.|👽 50 56 22 shake, ⭐ 25 25 8 twinkle
+space|"Where is my planet?" he asked the comet.|☄️ 70 30 18 zoom, 👽 35 60 18 bob
+space|The comet said, "Follow the bright stars!"|☄️ 50 30 20 fly, ⭐ 80 20 10 twinkle
+space|He zoomed past Saturn and its rings.|🪐 60 40 28 spin, 🛸 30 62 16 zoom
+space|At last he saw a green planet. Home!|🌎 60 46 30 spin, 🛸 30 62 16 bob
+space|His family gave him a big hug.|👽 40 60 18 dance, 👽 60 60 22 dance, 💚 50 30 12 float
+@wizard|The Wizard's Hat|🧙|#b39ddb|8
+castle|A wizard named Zed had a tall purple hat.|🧙 50 60 28 bob
+castle|One day, his hat flew away in the wind!|🎩 60 30 18 fly, 💨 40 40 12 float
+grass|A rabbit hopped into the hat.|🎩 50 70 20 , 🐇 50 52 14 jump
+grass|The hat began to glow. Sparkle, sparkle!|🎩 50 64 24 grow, ✨ 35 40 10 twinkle, ✨ 65 40 10 twinkle
+castle|Out popped a hundred flowers!|💐 50 52 30 grow, 🌸 25 40 10 float, 🌼 75 40 10 float
+castle|Zed laughed. "That is the best magic ever!"|🧙 45 60 26 dance, 🐇 70 70 12 jump
+@treasure|The Dragon's Treasure|💎|#ffd54f|8
+cavedark|Deep in a mountain, a dragon kept her treasure.|🐉 50 56 30 sleep, 💎 70 76 12 twinkle
+cavedark|She had gold coins, shiny jewels, and a crown.|🪙 30 70 12 spin, 💎 50 70 12 twinkle, 👑 70 70 14 wiggle
+castle|One day, a girl named Ruby knocked on the door.|👧 50 60 22 wave
+cavedark|"Will you be my friend?" asked Ruby.|👧 35 62 18 bob, 🐉 64 56 26 wiggle
+cavedark|The dragon smiled. "Friends are better than gold!"|🐉 60 56 28 dance, 💖 40 30 12 float
+sunset|Now they fly together over the mountains.|🐉 50 40 28 fly, 👧 50 30 10 bob

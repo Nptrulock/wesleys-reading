@@ -7,6 +7,7 @@ import edge_tts
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 A = os.path.join(ROOT, 'audio')
+ONLY_SND = '--snd' in sys.argv
 VOICE = 'en-US-AvaNeural'
 FORCE = '--force' in sys.argv
 D = json.loads(subprocess.check_output(['node', '-e', "const D=require('./data.js');console.log(JSON.stringify(D))"], cwd=ROOT))
@@ -17,6 +18,12 @@ def tokens(t):
         w = re.sub(r"[^a-z'-]", '', raw.lower()).strip("'")
         out.append(w)
     return out
+
+# ---------- merge v3 content (same rules as app.js applyContent) ----------
+C = json.loads(subprocess.check_output(['node', '-e', "console.log(JSON.stringify(require('./content.js')))"], cwd=ROOT))
+D['RAIN_LEVELS'] = C['RAIN_LEVELS']; D['STORIES'] = D['STORIES'] + C['STORIES']
+D['RACE_NOUNS'] = C['RACE']['NOUNS']; D['RACE_VERBS'] = C['RACE']['VERBS']; D['RACE_ADJS'] = C['RACE']['ADJS']; D['RACE_PLACES'] = C['RACE']['PLACES']; D['RACE_LEVELS'] = C['RACE']['LEVELS']
+D['ACTIONS'] = C['ACTIONS']; D['ROOMS'] = C['ROOMS']; D['PHRASES'] = dict(D['PHRASES'], **C['PHRASES'])
 
 # ---------- collect words ----------
 words = {}
@@ -32,10 +39,13 @@ for st in D['STORIES']:
     for p in st['pages']:
         for w in tokens(p['t']): addw(w)
 for n in D['RACE_NOUNS']: addw(n['s']); addw(n['p'])
-for v in D['RACE_VERBS']: addw(v['b']); addw(v['s'])
+for v in D['RACE_VERBS']: addw(v['b']); addw(v['s']); addw(v['i'])
 for a in D['RACE_ADJS']: addw(a['w'])
 for p in D['RACE_PLACES']: addw(p['w'])
-for w in ['the', 'can', 'The']: addw(w)
+for lv in D['RACE_LEVELS']:
+    for sl in lv['slots']:
+        if sl.startswith('='): addw(sl[1:].lower().strip('!?.'))
+for w in ['the', 'can', 'The', 'and', 'then', 'first', 'dragon', 'look', 'is']: addw(w)
 for a in D['ACTIONS']: addw(a['w'])
 for p in D['ACTION_PHRASES']:
     addw(p['w'])
@@ -44,7 +54,7 @@ for r in D['ROOMS']:
     addw(r['name'])
     for it in r['items']: addw(it[0])
 # pronunciation fixes for single words read in isolation
-FIX = {'read': 'read', 'i': 'I', 'a': 'a', 'the': 'the', 'yo-yo': 'yo-yo', 'lead': 'lead', 'wes': 'Wes', 'sam': 'Sam', 'max': 'Max', 'dot': 'Dot', 'luna': 'Luna', 'ember': 'Ember', 'us': 'us', 'live': 'live'}
+FIX = {'read': 'read', 'i': 'I', 'a': 'a', 'the': 'the', 'yo-yo': 'yo-yo', 'lead': 'lead', 'wes': 'Wes', 'sam': 'Sam', 'max': 'Max', 'dot': 'Dot', 'luna': 'Luna', 'ember': 'Ember', 'us': 'us', 'live': 'live', 't-rex': 'T. rex', 'dodo-bird': 'dodo bird', 'zoe': 'Zoe', 'jake': 'Jake', 'mike': 'Mike', 'kay': 'Kay', 'ray': 'Ray', 'gail': 'Gail', 'bart': 'Bart', 'mark': 'Mark', 'ruby': 'Ruby', 'zed': 'Zed', 'pete': 'Pete', 'gus': 'Gus', 'ben': 'Ben', 'sparky': 'Sparky', 'chip': 'Chip', 'sir': 'Sir', 'rex': 'rex'}
 for k, v in FIX.items():
     if k in words: words[k] = v
 
@@ -56,7 +66,7 @@ SND = {
  'n':('nut',0,190,0),'r':('rug',0,190,0),'s':('sun',0,220,0),'v':('van',0,190,0),'w':('won',0,190,0),'y':('yum',0,180,0),
  'z':('zap',0,210,0),'q':('quack',0,240,0),'x':('box',0,260,1),
  'sh':('shush',0,240,0),'ch':('chug',0,190,0),'th':('thumb',0,210,0),'ck':('cup',0,150,0),'ng':('sing',0,230,1),
- 'ee':('eel',0,250,0),'oo':('ooze',0,260,0),'ll':('luck',0,190,0),'ss':('sun',0,220,0),'ff':('fun',0,210,0),
+ 'ee':('eel',0,250,0),'ai':('aim',0,260,0),'oa':('oak',0,270,0),'igh':('ice',0,280,0),'ar':('arm',0,300,0),'or':('or',0,330,0),'er':('earn',0,300,0),'ou':('ouch',0,270,0),'oi':('oink',0,300,0),'aw':('awesome',0,260,0),'oo':('ooze',0,260,0),'ll':('luck',0,190,0),'ss':('sun',0,220,0),'ff':('fun',0,210,0),
 }
 
 SEM = asyncio.Semaphore(8)
@@ -95,7 +105,11 @@ def trim(src, dst):
     b = pcm(dst)
     if len(b) < .18 * sr or np.abs(b).max() < .1: raise RuntimeError('trim check failed for ' + dst)
 
+FAILED = []
 async def make_word(key, text, folder, rate='-5%'):
+    try: await _make_word(key, text, folder, rate)
+    except Exception as e: FAILED.append((folder, key, str(e))); print('FAIL', folder, key, e, file=sys.stderr)
+async def _make_word(key, text, folder, rate='-5%'):
     dst = os.path.join(A, folder, key + '.mp3')
     if os.path.exists(dst) and not FORCE: return
     tmp = dst + '.raw.mp3'
@@ -145,6 +159,7 @@ async def main():
     man = {'voice': VOICE, 'w': sorted(words), 'p': sorted(D['PHRASES']), 'ln': D['LETTERS'], 'ls': sorted(SND), 'pages': pages}
     with open(os.path.join(A, 'manifest.js'), 'w') as f: f.write('window.AUDIO_MANIFEST=' + json.dumps(man, separators=(',', ':')) + ';\n')
     n = sum(len(fs) for _, _, fs in os.walk(A))
+    print('FAILED', FAILED)
     print('words', len(words), 'phrases', len(D['PHRASES']), 'pages', len(pages), 'files', n)
 
 asyncio.run(main())
