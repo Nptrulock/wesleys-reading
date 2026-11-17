@@ -1391,7 +1391,7 @@ function actPlay() {
         say(['w', t.w]); await act(t.a); if (!still()) return; await say([line('cheer') || praise()]); if (still()) next();
       });
     } else if (L.kind === 'tap' || L.kind === 'read') {
-      const t = draw(); const opts = shuffle([t].concat(distinct(all.filter(a => a.w !== t.w), nCards - 1, [t.a])));
+      const t = draw(); const opts = shuffle([t].concat(distinct(all.filter(a => a.w !== t.w), nCards - 1, [t.a]))); window.__act.cur = { t };
       const reading = L.kind === 'read';
       words.innerHTML = `${reading ? `<button class="bigWord small lt" data-w="${t.w}">${esc(t.w)}</button>` : `<button class="bigWord small ear" aria-label="Hear it">${E('👂')}</button>`}<div class="aCards">${opts.map(cardHtml).join('')}</div>`;
       startLoops(); preload(opts.map(a => ['w', a.w]));
@@ -1414,7 +1414,7 @@ function actPlay() {
     } else if (L.kind.startsWith('do')) {
       const k = +L.kind.slice(2), tpls = { 2: ['W and W', 'W then W', 'first W, then W'], 3: ['W, W, then W', 'W and W, then W'], 4: ['W, W, W, then W'] }[k];
       const seq = distinct(all, k), tpl = pick(tpls); let q = 0;
-      const text = tpl.replace(/W/g, () => seq[q++].w); const raw = text.split(' ');
+      const text = tpl.replace(/W/g, () => seq[q++].w); const raw = text.split(' '); window.__act.cur = { seq };
       const palette = shuffle(seq.concat(distinct(all.filter(a => !seq.some(s => s.a === a.a)), Math.max(2, (k === 2 ? 4 : 5) - k))));
       words.innerHTML = `<div class="phrase">${raw.map((w, j) => `<button class="aw lt" data-w="${bare(w)}">${esc(j === 0 ? capFirst(w) : w)}</button>`).join('')}</div><div class="aCards wide">${palette.map(cardHtml).join('')}</div>`;
       startLoops(); preload(raw.map(w => ['w', bare(w)]));
@@ -1451,7 +1451,7 @@ function actPlay() {
       const fields = long ? ['verb', 'noun', 'adj', 'place'] : ['verb', 'noun', 'verb'];
       const keyO = (o) => [o.noun.s, o.verb.a, o.adj && o.adj.a, o.place && o.place.e].join('|'), seenO = new Set([keyO(t)]), dist = [];
       for (let k = 0; dist.length < nCards - 1 && k < 40; k++) { const v = vary(t, fields[k % fields.length]); if (!seenO.has(keyO(v))) { seenO.add(keyO(v)); dist.push(v); } }
-      const opts = shuffle([t].concat(dist));
+      const opts = shuffle([t].concat(dist)); window.__act.cur = { ti: opts.indexOf(t) };
       const ws = ['the'].concat(t.adj ? [t.adj.w] : [], [t.noun.s, t.verb.s], t.place ? [t.place.w] : []);
       const text = capFirst(ws.join(' ')) + '.';
       const scard = (o) => `<button class="pmCard sCard">${o.place ? `<span class="pmPlace emoji">${o.place.e}</span>` : ''}<span class="pmRow n1"><span class="pmA ${o.adj ? 'c-' + o.adj.a + ' s-' + o.adj.a : ''}"><span class="emoji">${o.noun.e}</span>${ACT_TAG[o.verb.a] ? `<i class="emoji tag">${ACT_TAG[o.verb.a]}</i>` : ''}</span></span></button>`;
@@ -1476,9 +1476,9 @@ function actPlay() {
       }));
     }
   }
+  window.__act = { L, n: () => n, cur: null };
   nextBtn(el, () => { if (alive) { hush(); next(); } }, 'Next');
   next();
-  window.__act = { L, n: () => n };
 }
 // Mix: free play reward (build a silly combo; refresh any word type, or shuffle them all)
 function actMix() {
@@ -1736,7 +1736,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
 document.addEventListener('touchmove', e => { if (!e.target.closest('.shop, .roomTabs, .card, .levelMap, .shelves')) e.preventDefault(); }, { passive: false });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hush(); });
 let rsT = 0; window.addEventListener('resize', () => { clearTimeout(rsT); rsT = setTimeout(() => { if ($('#gallery.show') && window.__gallery) window.__gallery.renderRoom(); }, 250); });
-window.__app = { S: () => S, save, go, addPoints, say, AU, D, reader, gallery, actionHome, actPlay, actMix, vanPlay, pmPlay, rainPlay, racePlay, wordGalleries, medalAward, roundDone, speakable, clip, loadBuf, anim, ladStars };
+window.__app = { S: () => S, save, go, addPoints, say, AU, D, reader, gallery, actionHome, actPlay, actMix, vanPlay, pmPlay, rainPlay, racePlay, wordGalleries, medalAward, roundDone, speakable, clip, loadBuf, anim, ladStars, dbg: () => ({ seq: seqId, act: !!active, st: ctx && ctx.state, buf: BUF.size, eng: S.engine }) };
 applyFont();
 start();
 })();
