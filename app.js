@@ -1539,7 +1539,7 @@ function wordGalleries(tab) {
   } else {
     const list = tab === 'secret' ? D.WG.SECRET : D.WG.STICKERS;
     grid.innerHTML = order.map(id => { const x = list.find(v => v.w === id); return wgHas(tab, id)
-      ? `<button class="wgItem ${tab}" data-w="${esc(x.w)}" data-a="${x.a}"><span class="emoji">${x.e}</span><b class="lt">${esc(x.w)}</b></button>`
+      ? `<button class="wgItem ${tab}" data-w="${esc(x.w)}" data-a="${x.a}"><span class="emoji">${x.e}</span><b class="lt${x.w.length > 11 ? ' xlong' : x.w.length > 8 ? ' long' : ''}">${esc(x.w)}</b></button>`
       : `<button class="wgItem locked" data-lock="${medalNo(id)}"><span class="emoji">❔</span><b>${E('🏅')} ${medalNo(id)}</b></button>`; }).join('');
   }
   $$('[data-lock]', grid).forEach(b => b.addEventListener('click', () => { SFX.boing(); anim(b, 'shake'); say([line('wg_locked'), ['p', 'medal_count']].slice(0, 1)); }));
